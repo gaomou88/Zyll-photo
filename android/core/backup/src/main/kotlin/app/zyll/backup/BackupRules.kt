@@ -85,6 +85,16 @@ data class AccountLimits(val perKind: Int, val total: Int) {
     fun canAdd(kind: DriveKind, signedIn: Collection<CloudProvider>): Boolean =
         signedIn.size < total && signedIn.count { it.kind == kind } < perKind
 
+    /**
+     * 已登录的账号里哪些在限额以内（可以备份）。按槽位先后算：每种网盘的第一个账号先算，
+     * 超出的（比如 Pro 退款后多出来的账号）保留登录但暂停备份。
+     */
+    fun allowed(signedIn: Collection<CloudProvider>): Set<CloudProvider> {
+        val kept = ArrayList<CloudProvider>()
+        for (p in signedIn.sorted()) if (canAdd(p.kind, kept)) kept += p
+        return kept.toSet()
+    }
+
     companion object {
         val FREE = AccountLimits(perKind = 1, total = 2)
         val PRO = AccountLimits(perKind = 5, total = 10)

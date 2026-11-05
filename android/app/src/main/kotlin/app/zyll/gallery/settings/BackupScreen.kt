@@ -126,6 +126,8 @@ fun BackupScreen(cloud: CloudBackup, albums: List<Album>, padding: PaddingValues
                 d,
                 canConnect = cloud.canSignIn(d.provider),
                 limitHint = limitHint,
+                // 开源版没有 Pro：只能让用户退出多出来的账号
+                pausedText = tr(if (cloud.limits == AccountLimits.SINGLE) R.string.cloud_paused_single else R.string.cloud_paused_over_limit),
                 onConnect = {
                     signingIn = d.provider
                     signIn.launch(cloud.signInIntent(d.provider))
@@ -348,7 +350,14 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun DriveCard(d: DriveState, canConnect: Boolean, limitHint: String?, onConnect: () -> Unit, onDisconnect: () -> Unit) {
+private fun DriveCard(
+    d: DriveState,
+    canConnect: Boolean,
+    limitHint: String?,
+    pausedText: String,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+) {
     Card {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(
@@ -367,7 +376,8 @@ private fun DriveCard(d: DriveState, canConnect: Boolean, limitHint: String?, on
                 Text(
                     when {
                         !d.configured -> tr(R.string.cloud_not_supported, d.provider.label)
-                        d.needsReconnect -> tr(R.string.cloud_reconnect)
+                        d.needsReconnect -> d.error ?: tr(R.string.cloud_reconnect)
+                        d.signedIn && d.paused -> listOfNotNull(a?.name, pausedText).joinToString(" · ")
                         !d.signedIn && !canConnect -> limitHint ?: tr(R.string.cloud_not_connected)
                         !d.signedIn -> d.error ?: tr(R.string.cloud_not_connected)
                         a == null -> d.error ?: tr(R.string.cloud_reading_space)

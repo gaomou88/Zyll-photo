@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="account_already_signed_in">這個帳號已經登入過了</string>
+    <string name="account_unverified">無法確認登入的是哪個帳號，請聯網後重試</string>
     <string name="ai_results_corrupt">結果檔案損壞</string>
     <string name="ai_results_trailing">結果檔案末尾有多餘資料</string>
     <string name="ai_results_truncated">結果檔案被截斷</string>

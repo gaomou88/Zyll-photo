@@ -72,6 +72,8 @@
     <string name="cloud_disconnect">断开</string>
     <string name="cloud_not_connected">未连接</string>
     <string name="cloud_not_supported">这个版本暂不支持 %1$s</string>
+    <string name="cloud_paused_over_limit">超出免费版账号数量，已暂停备份，解锁 Pro 后继续</string>
+    <string name="cloud_paused_single">开源版只能使用一个网盘账号，这个账号已暂停备份。退出其中一个账号即可恢复</string>
     <string name="cloud_photo_missing">找不到这张网盘照片</string>
     <string name="cloud_reading_space">已连接，正在读取空间…</string>
     <string name="cloud_reconnect">请重新连接一次</string>

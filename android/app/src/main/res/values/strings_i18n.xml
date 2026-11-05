@@ -72,6 +72,8 @@
     <string name="cloud_disconnect">Disconnect</string>
     <string name="cloud_not_connected">Not connected</string>
     <string name="cloud_not_supported">This version does not support %1$s yet</string>
+    <string name="cloud_paused_over_limit">Over the free account limit. Backup is paused until you unlock Pro.</string>
+    <string name="cloud_paused_single">The open-source edition can use only one cloud account, so backup to this one is paused. Sign out of one account to resume.</string>
     <string name="cloud_photo_missing">This cloud photo cannot be found</string>
     <string name="cloud_reading_space">Connected, reading storage…</string>
     <string name="cloud_reconnect">Please reconnect</string>

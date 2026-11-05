@@ -72,6 +72,8 @@
     <string name="cloud_disconnect">斷開</string>
     <string name="cloud_not_connected">未連線</string>
     <string name="cloud_not_supported">這個版本暫不支援 %1$s</string>
+    <string name="cloud_paused_over_limit">超出免費版帳號數量，已暫停備份，解鎖 Pro 後繼續</string>
+    <string name="cloud_paused_single">開源版只能使用一個雲端硬碟帳號，這個帳號已暫停備份。退出其中一個帳號即可恢復</string>
     <string name="cloud_photo_missing">找不到這張雲端硬碟照片</string>
     <string name="cloud_reading_space">已連線，正在讀取空間…</string>
     <string name="cloud_reconnect">請重新連線一次</string>

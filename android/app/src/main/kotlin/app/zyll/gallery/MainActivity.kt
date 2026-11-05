@@ -139,11 +139,13 @@ class MainActivity : ComponentActivity() {
         return true
     }
 
+    private var entitlements: Entitlements? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         GalleryImages.install(this)
-        val entitlements = FlavorServices.entitlements(applicationContext)
+        val entitlements = FlavorServices.entitlements(applicationContext).also { this.entitlements = it }
         val controller = AppGraph.controller(this)
         val cloud = CloudBackup.get(this)
         // Pro 决定：能登录几个网盘账号（Play 免费版各一个、Pro 多个，GitHub 版一共一个）、能不能用端侧 AI
@@ -246,6 +248,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AppGraph.setActivity(this)
+        entitlements?.refresh()
     }
 
     override fun onPause() {

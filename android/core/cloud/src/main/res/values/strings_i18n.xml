@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="account_already_signed_in">This account is already signed in</string>
+    <string name="account_unverified">Couldn\'t confirm which account you signed in to. Connect to the internet and try again.</string>
     <string name="ai_results_corrupt">The results file is damaged</string>
     <string name="ai_results_trailing">The results file has extra data at the end</string>
     <string name="ai_results_truncated">The results file is truncated</string>

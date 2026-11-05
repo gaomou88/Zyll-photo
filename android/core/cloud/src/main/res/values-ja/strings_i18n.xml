@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="account_already_signed_in">このアカウントはすでにサインインしています</string>
+    <string name="account_unverified">サインインしたアカウントを確認できませんでした。インターネットに接続してもう一度お試しください</string>
     <string name="ai_results_corrupt">結果ファイルが破損しています</string>
     <string name="ai_results_trailing">結果ファイルの末尾に余分なデータがあります</string>
     <string name="ai_results_truncated">結果ファイルが途中で切れています</string>

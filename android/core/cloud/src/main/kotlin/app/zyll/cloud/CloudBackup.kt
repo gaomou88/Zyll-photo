@@ -63,6 +63,8 @@ data class DriveState(
     val needsReconnect: Boolean = false,
     val account: DriveAccount? = null,
     val error: String? = null,
+    /** 超出当前限额（比如 Pro 退款后多出来的账号）：保留登录，但暂停备份。 */
+    val paused: Boolean = false,
 )
 
 /** 一轮任务在做什么。 */
@@ -166,16 +168,47 @@ class CloudBackup private constructor(context: Context) {
         (drive(p) as? GoogleDriveApi)?.forgetFolders()
     }
 
-    /** 能登录几个账号；App 按发行版和是否 Pro 设置。后台任务里不用（只限制新登录）。 */
-    @Volatile var limits: AccountLimits = AccountLimits.FREE
+    /**
+     * 能用几个账号；App 按发行版和是否 Pro 设置，并存下来给后台任务用。
+     * 新登录不能超过它；已登录但超出的账号暂停备份（见 [pausedProviders]）。
+     */
+    @Volatile var limits: AccountLimits = loadLimits()
+        set(value) {
+            if (field == value) return
+            field = value
+            names.edit().putInt(KEY_LIMIT_PER_KIND, value.perKind).putInt(KEY_LIMIT_TOTAL, value.total).apply()
+            if (::_drives.isInitialized) refreshPaused()
+        }
+
+    private fun loadLimits(): AccountLimits {
+        val perKind = names.getInt(KEY_LIMIT_PER_KIND, -1)
+        val total = names.getInt(KEY_LIMIT_TOTAL, -1)
+        return if (perKind > 0 && total > 0) AccountLimits(perKind, total) else AccountLimits.FREE
+    }
+
+    /** 已登录、但超出 [limits] 的账号：保留登录，暂停备份。 */
+    private fun pausedProviders(): Set<CloudProvider> {
+        val signedIn = signedInProviders()
+        return signedIn.toSet() - limits.allowed(signedIn)
+    }
+
+    private fun refreshPaused() {
+        val paused = pausedProviders()
+        _drives.update { list -> list.map { it.copy(paused = it.provider in paused) } }
+    }
     private val lock = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _settings = MutableStateFlow(settingsStore.load())
     val settings: StateFlow<BackupSettings> = _settings.asStateFlow()
 
-    private val _drives = MutableStateFlow(CloudProvider.entries.map(::initialState))
-    val driveStates: StateFlow<List<DriveState>> = _drives.asStateFlow()
+    private lateinit var _drives: MutableStateFlow<List<DriveState>>
+    val driveStates: StateFlow<List<DriveState>>
+
+    init {
+        _drives = MutableStateFlow(CloudProvider.entries.map(::initialState))
+        driveStates = _drives.asStateFlow()
+    }
 
     private val _status = MutableStateFlow(BackupStatus())
     val status: StateFlow<BackupStatus> = _status.asStateFlow()
@@ -288,7 +321,7 @@ class CloudBackup private constructor(context: Context) {
     }
 
     private fun initialState(p: CloudProvider) =
-        DriveState(p, CloudConfig.of(p).configured, auth.isSignedIn(p), auth.needsReconnect(p))
+        DriveState(p, CloudConfig.of(p).configured, auth.isSignedIn(p), auth.needsReconnect(p), paused = p in pausedProviders())
 
     /** 已连接网盘的简短描述，给系统照片选择器显示。没有连接时返回 null。 */
     fun accountSummary(): String? = CloudProvider.entries
@@ -399,9 +432,34 @@ class CloudBackup private constructor(context: Context) {
 
     suspend fun completeSignIn(p: CloudProvider, data: Intent?) {
         addSlot(p)
+        val wasReconnect = auth.needsReconnect(p)
+        val previousAuth = if (wasReconnect) auth.savedState(p) else null
         try {
-            val wasReconnect = auth.needsReconnect(p)
             auth.complete(p, data)
+            // 先确认登的是哪个账号：同一个账号不能占两个槽位，否则会往同一个网盘目录里互相覆盖。
+            // 拿不到账号 id（比如网络不好）就不算登录成功，免得跳过这一步检查。
+            val account = try {
+                retrying { drive(p).account() }
+            } catch (e: IOException) {
+                null
+            }
+            val id = account?.id
+            val problem = when {
+                id == null -> tr(R.string.account_unverified)
+                duplicateOf(p, id) != null -> tr(R.string.account_already_signed_in)
+                else -> null
+            }
+            if (problem != null) {
+                if (wasReconnect) {
+                    // 重新连接时登错了账号或没联网：保留这个槽位原来的账号和记录，仍然是“需要重新连接”
+                    auth.restoreState(p, previousAuth)
+                    setDrive(p) { initialState(p).copy(error = problem) }
+                } else {
+                    signOut(p)
+                }
+                _accountNotice.value = problem
+                return
+            }
             if (wasReconnect) {
                 // 存储位置变了，旧位置的记录作废，重新备份到新位置
                 records.clear(p)
@@ -409,13 +467,7 @@ class CloudBackup private constructor(context: Context) {
                 reloadRecords()
             }
             refreshAccount(p)
-            // 同一个账号不能登录两次：两个槽位会往同一个网盘目录里互相覆盖
-            val id = names.getString(KEY_ACCOUNT_ID + p.name, null)
-            if (id != null && CloudProvider.entries.any { it != p && it.kind == p.kind && auth.isSignedIn(it) && names.getString(KEY_ACCOUNT_ID + it.name, null) == id }) {
-                signOut(p)
-                _accountNotice.value = tr(R.string.account_already_signed_in)
-                return
-            }
+            refreshPaused()
             resetAccount(p)
             // 换了手机或重装后：先看网盘里有没有以前的加密密钥包，再从备份目录找回以前备份过的照片
             scope.launch {
@@ -438,6 +490,11 @@ class CloudBackup private constructor(context: Context) {
         }
     }
 
+    /** 已经有别的槽位登录了 [id] 这个账号时，返回那个槽位。 */
+    private fun duplicateOf(p: CloudProvider, id: String): CloudProvider? = CloudProvider.entries.firstOrNull {
+        it != p && it.kind == p.kind && auth.isSignedIn(it) && names.getString(KEY_ACCOUNT_ID + it.name, null) == id
+    }
+
     fun signOut(p: CloudProvider) {
         auth.signOut(p)
         // 换账号后旧记录不再成立，下次连接时重新检查
@@ -448,6 +505,7 @@ class CloudBackup private constructor(context: Context) {
         forgetFolders(p)
         setDrive(p) { initialState(p) }
         removeSlot(p)
+        refreshPaused()
         notifyPicker()
         scope.launch { reloadRecords() }
         schedule()
@@ -478,6 +536,14 @@ class CloudBackup private constructor(context: Context) {
                     throw e
                 }
             }.also { a ->
+                // 以前的版本在没联网时可能让同一个账号占了两个槽位：发现后停用后加的那个
+                val dup = a.id?.let { duplicateOf(p, it) }
+                if (dup != null) {
+                    val drop = if (p.slot >= dup.slot) p else dup
+                    signOut(drop)
+                    _accountNotice.value = tr(R.string.account_already_signed_in)
+                    if (drop == p) return null
+                }
                 rememberAccount(p, a)
                 accountCheckedAt[p] = android.os.SystemClock.elapsedRealtime()
                 setDrive(p) { it.copy(signedIn = true, needsReconnect = false, account = a, error = null) }
@@ -745,7 +811,7 @@ class CloudBackup private constructor(context: Context) {
         if (!names.getBoolean(KEY_INDEX_DIRTY, false)) return
         runCatching {
             lock.withLock {
-                val connected = _drives.value.filter { it.signedIn && it.account != null }.map { it.provider }.toSet()
+                val connected = _drives.value.filter { it.signedIn && it.account != null && !it.paused }.map { it.provider }.toSet()
                 if (connected.isEmpty()) return@withLock
                 uploadIndex(connected, vault.wantEncrypted, runCatching { vault.wrapKey() }.getOrNull(), force = true)
             }
@@ -796,8 +862,9 @@ class CloudBackup private constructor(context: Context) {
         if (!s.enabled && stale.isEmpty() && forced.isEmpty()) return@withLock true
         setStatus(progress) { it.copy(phase = BackupPhase.Checking, message = null, manual = manual, total = 0, done = 0) }
         try {
+            val paused = pausedProviders()
             val statuses = CloudProvider.entries.map { p ->
-                val account = cachedAccount(p) ?: refreshAccount(p)
+                val account = if (p in paused) null else cachedAccount(p) ?: refreshAccount(p)
                 DriveStatus(p, connected = account != null, freeBytes = account?.freeBytes)
             }
             val online = statuses.filter { it.connected }.map { it.provider }.toSet()
@@ -2202,6 +2269,8 @@ class CloudBackup private constructor(context: Context) {
         private const val KEY_VAULT_ACCOUNTS = "vaultAccounts"
         private const val KEY_DEVICE_ID = "deviceId"
         private const val KEY_ACCOUNT_ID = "accountId-"
+        private const val KEY_LIMIT_PER_KIND = "limitPerKind"
+        private const val KEY_LIMIT_TOTAL = "limitTotal"
         private const val KEY_ACCOUNT_LABEL = "accountLabel-"
         private const val KEY_INDEX_VERSION = "indexVersion"
         private const val KEY_INDEX_SEQ = "indexSeq-"

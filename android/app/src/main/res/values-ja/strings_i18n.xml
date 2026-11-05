@@ -72,6 +72,8 @@
     <string name="cloud_disconnect">切断</string>
     <string name="cloud_not_connected">未接続</string>
     <string name="cloud_not_supported">このバージョンは %1$s にまだ対応していません</string>
+    <string name="cloud_paused_over_limit">無料版のアカウント数を超えているため、バックアップを一時停止しています。Pro を解放すると再開します</string>
+    <string name="cloud_paused_single">オープンソース版で使えるクラウドアカウントは 1 つだけのため、このアカウントへのバックアップを一時停止しています。どちらかのアカウントからサインアウトすると再開します</string>
     <string name="cloud_photo_missing">このクラウドの写真が見つかりません</string>
     <string name="cloud_reading_space">接続済み、容量を取得中…</string>
     <string name="cloud_reconnect">もう一度接続してください</string>

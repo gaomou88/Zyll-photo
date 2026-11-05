@@ -97,6 +97,15 @@ class CloudAuth(context: Context) {
         load(p)?.needsTokenRefresh = true
     }
 
+    /** 当前保存的登录状态（重新连接前先存一份，失败时可以原样放回）。 */
+    fun savedState(p: CloudProvider): String? = prefs.getString(p.name, null)
+
+    /** 放回 [savedState] 存下的登录状态；为 null 时等于退出登录。 */
+    fun restoreState(p: CloudProvider, json: String?) {
+        cache.remove(p)
+        if (json == null) prefs.edit().remove(p.name).apply() else prefs.edit().putString(p.name, json).apply()
+    }
+
     fun signOut(p: CloudProvider) {
         cache.remove(p)
         prefs.edit().remove(p.name).apply()

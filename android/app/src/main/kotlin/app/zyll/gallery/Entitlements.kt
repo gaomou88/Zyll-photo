@@ -34,6 +34,9 @@ interface Entitlements {
 
     /** 恢复购买：重新向商店查询当前商店账号的购买记录。 */
     suspend fun restore(): RestoreOutcome
+
+    /** 回到 App 时在后台重新查一次购买记录（退款、待付款完成不用重启 App 就能发现）。 */
+    fun refresh() {}
 }
 
 enum class RestoreOutcome { Restored, Pending, NothingFound, Failed }

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="account_already_signed_in">这个账号已经登录过了</string>
+    <string name="account_unverified">无法确认登录的是哪个账号，请联网后重试</string>
     <string name="ai_results_corrupt">结果文件损坏</string>
     <string name="ai_results_trailing">结果文件末尾有多余数据</string>
     <string name="ai_results_truncated">结果文件被截断</string>

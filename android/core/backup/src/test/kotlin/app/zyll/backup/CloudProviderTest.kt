@@ -56,4 +56,16 @@ class CloudProviderTest {
         assertFalse(AccountLimits.SINGLE.canAdd(DriveKind.OneDrive, listOf(g)))
         assertTrue(AccountLimits.SINGLE.canAdd(DriveKind.OneDrive, emptyList()))
     }
+
+    @Test
+    fun allowedKeepsFirstSlotsAndPausesTheRest() {
+        val g2 = CloudProvider.of(DriveKind.GoogleDrive, 1)
+        val g3 = CloudProvider.of(DriveKind.GoogleDrive, 2)
+        val all = listOf(g3, CloudProvider.OneDrive, g2, CloudProvider.GoogleDrive)
+        assertEquals(setOf(CloudProvider.GoogleDrive, CloudProvider.OneDrive), AccountLimits.FREE.allowed(all))
+        assertEquals(setOf(CloudProvider.GoogleDrive), AccountLimits.SINGLE.allowed(all))
+        assertEquals(all.toSet(), AccountLimits.PRO.allowed(all))
+        // 只有额外槽位登录着时，第一个额外槽位仍然可用
+        assertEquals(setOf(g2), AccountLimits.FREE.allowed(listOf(g3, g2)))
+    }
 }
