@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 分享、修图网盘照片时，把下载好的缓存文件交给别的 App -->
+<paths>
+    <cache-path name="cloud" path="cloud-view/" />
+</paths>

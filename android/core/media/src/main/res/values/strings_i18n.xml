@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="album_untitled">Untitled</string>
+    <string name="cannot_create_file">Could not create the file</string>
+    <string name="cannot_write_file">Could not write the file</string>
+    <string name="needs_android_11">Requires Android 11 or later</string>
+    <string name="no_delete_permission">No permission to delete</string>
+</resources>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="album_untitled">名称未設定</string>
+    <string name="cannot_create_file">ファイルを作成できません</string>
+    <string name="cannot_write_file">ファイルに書き込めません</string>
+    <string name="needs_android_11">Android 11 以降が必要です</string>
+    <string name="no_delete_permission">削除する権限がありません</string>
+</resources>

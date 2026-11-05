@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pro_title">Zyll Pro</string>
+    <string name="pro_summary_free">解鎖多帳號、裝置端 AI 和連接雲端媒體</string>
+    <string name="pro_summary_unlocked">已解鎖，感謝支持！</string>
+    <string name="pro_buy">解鎖 Pro</string>
+    <string name="pro_buy_with_price">解鎖 Pro · %1$s</string>
+    <string name="pro_pending">等待付款完成…</string>
+    <string name="pro_unavailable">暫時無法購買，請檢查網路後重試。</string>
+    <string name="pro_restore">恢復購買</string>
+    <string name="pro_restore_summary">購買紀錄跟隨 Google Play 帳號</string>
+    <string name="pro_restore_ok">已恢復 Pro</string>
+    <string name="pro_restore_pending">付款尚未完成，完成後會自動解鎖。</string>
+    <string name="pro_restore_none">這個 Google Play 帳號沒有購買紀錄。如果是用其他帳號購買的，請在 Play 商店切換到該帳號後再試。</string>
+    <string name="pro_restore_failed">無法連線 Google Play，請稍後再試。</string>
+    <string name="cloud_media_title">連接雲端媒體</string>
+    <string name="cloud_media_setting_active">已連接 · 其他應用程式選圖時可以直接選 Zyll 雲端硬碟中的相片</string>
+    <string name="cloud_media_setting_off">讓其他應用程式選圖時也能看到 Zyll 雲端硬碟中的相片</string>
+</resources>

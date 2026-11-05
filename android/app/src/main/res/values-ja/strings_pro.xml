@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pro_title">Zyll Pro</string>
+    <string name="pro_summary_free">複数アカウント、端末内 AI、クラウドメディアを解放</string>
+    <string name="pro_summary_unlocked">解放済み。ありがとうございます！</string>
+    <string name="pro_buy">Pro を解放</string>
+    <string name="pro_buy_with_price">Pro を解放 · %1$s</string>
+    <string name="pro_pending">お支払いの完了を待っています…</string>
+    <string name="pro_unavailable">現在購入できません。接続を確認してもう一度お試しください。</string>
+    <string name="pro_restore">購入を復元</string>
+    <string name="pro_restore_summary">購入は Google Play アカウントに紐づきます</string>
+    <string name="pro_restore_ok">Pro を復元しました</string>
+    <string name="pro_restore_pending">お支払いが未完了です。完了すると自動で解放されます。</string>
+    <string name="pro_restore_none">この Google Play アカウントには購入履歴がありません。別のアカウントで購入した場合は、Play ストアでそのアカウントに切り替えてからお試しください。</string>
+    <string name="pro_restore_failed">Google Play に接続できませんでした。後でもう一度お試しください。</string>
+    <string name="cloud_media_title">クラウドメディアに接続</string>
+    <string name="cloud_media_setting_active">接続済み · 他のアプリで Zyll のクラウドの写真を選べます</string>
+    <string name="cloud_media_setting_off">他のアプリの写真選択で Zyll のクラウドの写真を表示</string>
+</resources>

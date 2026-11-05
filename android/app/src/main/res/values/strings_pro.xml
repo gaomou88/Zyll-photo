@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pro_title">Zyll Pro</string>
+    <string name="pro_summary_free">Unlock multiple accounts, on-device AI and cloud media</string>
+    <string name="pro_summary_unlocked">Unlocked. Thank you!</string>
+    <string name="pro_buy">Unlock Pro</string>
+    <string name="pro_buy_with_price">Unlock Pro · %1$s</string>
+    <string name="pro_pending">Waiting for payment…</string>
+    <string name="pro_unavailable">Purchase is not available right now. Check your connection and try again.</string>
+    <string name="pro_restore">Restore purchase</string>
+    <string name="pro_restore_summary">Purchases follow your Google Play account</string>
+    <string name="pro_restore_ok">Pro restored</string>
+    <string name="pro_restore_pending">Payment is still pending. Pro unlocks once it completes.</string>
+    <string name="pro_restore_none">No purchase found for this Google Play account. If you bought Pro with another account, switch to it in the Play Store and try again.</string>
+    <string name="pro_restore_failed">Could not reach Google Play. Try again later.</string>
+    <string name="cloud_media_title">Connect cloud media</string>
+    <string name="cloud_media_setting_active">On · Other apps can pick photos from Zyll\'s cloud</string>
+    <string name="cloud_media_setting_off">Let other apps pick photos from Zyll\'s cloud</string>
+</resources>

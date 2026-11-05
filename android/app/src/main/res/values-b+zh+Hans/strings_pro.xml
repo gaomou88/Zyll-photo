@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pro_title">Zyll Pro</string>
+    <string name="pro_summary_free">解锁多账号、端侧 AI 和接入云端媒体</string>
+    <string name="pro_summary_unlocked">已解锁，感谢支持！</string>
+    <string name="pro_buy">解锁 Pro</string>
+    <string name="pro_buy_with_price">解锁 Pro · %1$s</string>
+    <string name="pro_pending">等待付款完成…</string>
+    <string name="pro_unavailable">暂时无法购买，请检查网络后重试。</string>
+    <string name="pro_restore">恢复购买</string>
+    <string name="pro_restore_summary">购买记录跟随 Google Play 账号</string>
+    <string name="pro_restore_ok">已恢复 Pro</string>
+    <string name="pro_restore_pending">付款尚未完成，完成后会自动解锁。</string>
+    <string name="pro_restore_none">这个 Google Play 账号没有购买记录。如果是用其他账号购买的，请在 Play 商店切换到那个账号后再试。</string>
+    <string name="pro_restore_failed">无法连接 Google Play，请稍后再试。</string>
+    <string name="cloud_media_title">接入云端媒体</string>
+    <string name="cloud_media_setting_active">已接入 · 其他应用选图时可以直接选 Zyll 网盘里的照片</string>
+    <string name="cloud_media_setting_off">让其他应用选图时也能看到 Zyll 网盘里的照片</string>
+</resources>

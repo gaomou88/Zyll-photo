@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="album_untitled">未命名</string>
+    <string name="cannot_create_file">无法新建文件</string>
+    <string name="cannot_write_file">无法写入文件</string>
+    <string name="needs_android_11">需要 Android 11 及以上</string>
+    <string name="no_delete_permission">没有删除权限</string>
+</resources>
