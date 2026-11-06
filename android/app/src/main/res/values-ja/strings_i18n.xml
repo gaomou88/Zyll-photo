@@ -185,7 +185,6 @@
     <string name="settings_ai_not_installed">未インストール。「発見」タブでオンにしてください</string>
     <string name="settings_ai_pro_hint">Pro 機能：文章で写真を検索、自動で分類</string>
     <string name="settings_ai_switch_failed">\nモデルを切り替えられませんでした：%1$s</string>
-    <string name="settings_all_unlocked">\u0020· すべての機能が利用可能</string>
     <string name="settings_backup_all">すべてバックアップ</string>
     <string name="settings_backup_all_off">%1$s 個のアルバムを除外中。アルバムごとにオンにできます</string>
     <string name="settings_backup_all_on">この端末のすべてのアルバムをバックアップします</string>
@@ -215,4 +214,6 @@
     <string name="settings_sensitive_wait">オン、AI モデルのダウンロード待ち</string>
     <string name="settings_smart_search">スマート検索</string>
     <string name="settings_version_prefix">バージョン %1$s ·\u0020</string>
+    <string name="settings_edition_free">\u0020· 無料版</string>
+    <string name="settings_edition_pro">\u0020· Pro 版</string>
 </resources>

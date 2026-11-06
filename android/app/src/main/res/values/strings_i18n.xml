@@ -185,7 +185,6 @@
     <string name="settings_ai_not_installed">Not installed. Turn it on in Discover.</string>
     <string name="settings_ai_pro_hint">Pro feature: search photos by text and sort them automatically</string>
     <string name="settings_ai_switch_failed">\nCould not switch models: %1$s</string>
-    <string name="settings_all_unlocked">\u0020· All features available</string>
     <string name="settings_backup_all">Back up everything</string>
     <string name="settings_backup_all_off">%1$s albums are excluded. You can turn them on in each album.</string>
     <string name="settings_backup_all_on">Every album on this phone is backed up</string>
@@ -215,4 +214,6 @@
     <string name="settings_sensitive_wait">On, waiting for the AI model to download</string>
     <string name="settings_smart_search">Smart search</string>
     <string name="settings_version_prefix">Version %1$s ·\u0020</string>
+    <string name="settings_edition_free">\u0020· Free edition</string>
+    <string name="settings_edition_pro">\u0020· Pro edition</string>
 </resources>

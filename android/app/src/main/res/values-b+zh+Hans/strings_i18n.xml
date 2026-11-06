@@ -185,7 +185,6 @@
     <string name="settings_ai_not_installed">未安装，在“发现”页开启</string>
     <string name="settings_ai_pro_hint">Pro 功能：解锁后可以用文字搜索照片、自动分类</string>
     <string name="settings_ai_switch_failed">\n换档没成功：%1$s</string>
-    <string name="settings_all_unlocked">\u0020· 全部功能开放</string>
     <string name="settings_backup_all">全部备份</string>
     <string name="settings_backup_all_off">已有 %1$s 个相簿设为不备份，可在相簿里单独打开</string>
     <string name="settings_backup_all_on">手机上所有相簿都会备份</string>
@@ -215,4 +214,6 @@
     <string name="settings_sensitive_wait">已开启，等待下载 AI 模型</string>
     <string name="settings_smart_search">智能搜索</string>
     <string name="settings_version_prefix">版本 %1$s ·\u0020</string>
+    <string name="settings_edition_free">\u0020· 免费版</string>
+    <string name="settings_edition_pro">\u0020· Pro 版</string>
 </resources>

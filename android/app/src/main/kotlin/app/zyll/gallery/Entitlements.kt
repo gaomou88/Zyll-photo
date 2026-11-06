@@ -3,8 +3,8 @@ package app.zyll.gallery
 import android.app.Activity
 import kotlinx.coroutines.flow.StateFlow
 
-/** 开发阶段不上锁：所有 Pro 功能对所有人开放。Play Console 里的商品上架、准备收费时改成 true。 */
-const val PRO_LOCK_ENABLED = false
+/** Pro 锁：true 时多账号、端侧 AI 和接入云端媒体需要购买 pro_unlock。改成 false 可在测试时临时全部开放。 */
+const val PRO_LOCK_ENABLED = true
 
 /**
  * 付费功能的开关。main 里只依赖这个接口：

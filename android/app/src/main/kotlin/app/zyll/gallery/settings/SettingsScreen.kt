@@ -277,10 +277,9 @@ fun SettingsScreen(
                 Icons.Outlined.Info,
                 tr(R.string.settings_about_app),
                 tr(R.string.settings_version_prefix, BuildConfig.VERSION_NAME) + FlavorServices.DISTRIBUTION + when {
-                    !entitlements.hasEditor -> ""
-                    !PRO_LOCK_ENABLED -> tr(R.string.settings_all_unlocked)
-                    pro -> tr(R.string.settings_pro_unlocked)
-                    else -> ""
+                    !entitlements.hasEditor -> "" // 开源版没有付费功能
+                    pro || !PRO_LOCK_ENABLED -> tr(R.string.settings_edition_pro)
+                    else -> tr(R.string.settings_edition_free)
                 },
             ) { onOpen(MePage.About) }
         }
