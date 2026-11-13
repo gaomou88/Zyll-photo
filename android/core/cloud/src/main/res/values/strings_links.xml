@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="link_err_nothing">Choose at least one photo.</string>
+    <string name="link_err_encryption">Links can only share end-to-end encrypted backups. Turn on encryption (and unlock it on this phone) first.</string>
+    <string name="link_err_storage">Turn on sharing for your Google account first. Backups in the hidden area can\'t be shared by link.</string>
+    <string name="link_err_not_backed_up">These photos aren\'t backed up with encryption yet. Back them up first, then create the link.</string>
+    <string name="link_err_password">The password needs at least %1$d characters.</string>
+    <string name="link_err_expiry">The expiry time has already passed.</string>
+    <string name="link_err_too_many">One link can hold up to %1$d photos.</string>
+    <string name="link_err_network">Couldn\'t reach your cloud drive. Nothing was shared. Please try again.</string>
+    <string name="link_err_wiping">Backup data is being deleted, so links can\'t be created right now.</string>
+    <string name="link_err_not_allowed">This account doesn\'t allow public links (work or school accounts are often restricted by the admin).</string>
+</resources>

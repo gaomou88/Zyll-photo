@@ -22,6 +22,8 @@ data class MediaItem(
     val relativePath: String,
     /** 图片的 EXIF 旋转角度（0/90/180/270），视频为 0。 */
     val orientation: Int = 0,
+    /** 已知是动态照片（只在网盘里的照片由备份目录的 mo 标记带来；本机照片见 GalleryController 的扫描结果）。 */
+    val motion: Boolean = false,
 ) {
     /** 显示时的宽高比（已按旋转角度换算）；尺寸未知时为 null。 */
     val displayAspect: Float?

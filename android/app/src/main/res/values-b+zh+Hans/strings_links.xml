@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="links_title">分享链接</string>
+    <string name="links_empty">还没有分享链接。在相册里选好照片，点“分享”，再点“创建链接”。</string>
+    <string name="links_count">%1$d 项</string>
+    <string name="links_forever">永久有效</string>
+    <string name="links_until">%1$s 失效</string>
+    <string name="links_expired">已过期</string>
+    <string name="links_originals_on">可下载原图</string>
+    <string name="links_originals_off">不能下载</string>
+    <string name="links_copy">复制链接</string>
+    <string name="links_copied">链接已复制</string>
+    <string name="links_revoke">撤销</string>
+    <string name="links_revoking">撤销中…</string>
+    <string name="links_revoke_title">撤销这个链接？</string>
+    <string name="links_revoke_body">撤销后链接马上打不开，照片副本会删掉。已经被看过、下载过的照片收不回来。</string>
+    <string name="links_revoked">链接已撤销，副本已删掉。已经被看过、下载过的照片收不回来。</string>
+    <string name="sharing_off_links_title">请先撤销分享链接</string>
+    <string name="sharing_off_links_body">还有 %1$d 个分享链接在用这个网盘里的照片。关闭分享前，请先到「我的 → 共享相册 → 分享链接」里把它们撤销。</string>
+    <string name="links_send">发送</string>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="consent_title">歡迎使用 Zyll 相簿</string>
+    <string name="consent_body">開始使用前，請先閱讀《使用條款》和《隱私權政策》。Zyll 在這支手機上瀏覽和搜尋你的照片；不開雲端備份就不會上傳任何內容，開了也只傳到你自己的 Google Drive 或 OneDrive。\n\n點「同意」即表示你接受這兩份文件。</string>
+    <string name="consent_agree">同意</string>
+    <string name="consent_decline">不同意並退出</string>
+</resources>

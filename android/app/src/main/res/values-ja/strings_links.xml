@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="links_title">共有リンク</string>
+    <string name="links_empty">共有リンクはまだありません。ライブラリで写真を選び、「共有」→「リンクを作成」をタップしてください。</string>
+    <string name="links_count">%1$d 件</string>
+    <string name="links_forever">無期限</string>
+    <string name="links_until">%1$s に失効</string>
+    <string name="links_expired">期限切れ</string>
+    <string name="links_originals_on">元画像をダウンロード可</string>
+    <string name="links_originals_off">ダウンロード不可</string>
+    <string name="links_copy">リンクをコピー</string>
+    <string name="links_copied">リンクをコピーしました</string>
+    <string name="links_revoke">取り消す</string>
+    <string name="links_revoking">取り消し中…</string>
+    <string name="links_revoke_title">このリンクを取り消しますか？</string>
+    <string name="links_revoke_body">リンクはすぐに開けなくなり、写真のコピーは削除されます。すでに閲覧・ダウンロードされた写真は取り戻せません。</string>
+    <string name="links_revoked">リンクを取り消し、コピーを削除しました。すでに閲覧・ダウンロードされた写真は取り戻せません。</string>
+    <string name="sharing_off_links_title">先に共有リンクを取り消してください</string>
+    <string name="sharing_off_links_body">このクラウドの写真を使っている共有リンクがまだ %1$d 件あります。共有をオフにする前に、「マイページ → 共有アルバム → 共有リンク」で取り消してください。</string>
+    <string name="links_send">送信</string>
+</resources>

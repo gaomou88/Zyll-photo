@@ -28,6 +28,7 @@ rootProject.name = "zyll-android"
 include(":core:crypto")
 include(":core:search")
 include(":core:backup")
+include(":core:motion")
 
 // `-Pzyll.jvmOnly` 时跳过 Android 模块（用于没有 Android SDK 的环境）
 if (!jvmOnly) {

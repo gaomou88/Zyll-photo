@@ -17,6 +17,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class LibraryState(
@@ -48,6 +51,40 @@ class GalleryController(
 ) {
     private val prefs = context.applicationContext.getSharedPreferences("gallery-archive", Context.MODE_PRIVATE)
 
+    val appContext: Context get() = context.applicationContext
+
+    /**
+     * 跑一个不能被界面打断的长操作（从网盘恢复、从网盘删除、移动相簿、改位置等）。
+     * 放在 App 级的作用域里：界面关掉或重建时不会停在半路。
+     */
+    fun launchLong(block: suspend () -> Unit) = scope.launch { guarded(block) }
+
+    /** 长操作出错时提示一下，不让 App 闪退（界面可能已经没了，用 Toast）。 */
+    private suspend fun guarded(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(context.applicationContext, e.message ?: app.zyll.media.tr(R.string.action_failed_network), android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 长操作的进度（比如一次从网盘删很多张）。放在这里，界面重建后也能接着显示。 */
+    class LongProgress(val label: String, val done: Int, val total: Int, internal val token: Any)
+    private val _longProgress = MutableStateFlow<LongProgress?>(null)
+    val longProgress: StateFlow<LongProgress?> = _longProgress.asStateFlow()
+
+    /** 同 [launchLong]，[block] 用 report(已完成, 总数) 报进度；结束（含出错）后进度自动消失。 */
+    fun launchLong(label: String, block: suspend (report: (done: Int, total: Int) -> Unit) -> Unit) = scope.launch {
+        val token = Any()
+        try {
+            guarded { block { done, total -> _longProgress.value = LongProgress(label, done, total, token) } }
+        } finally {
+            _longProgress.update { if (it?.token === token) null else it }
+        }
+    }
+
     private val _local = MutableStateFlow<List<MediaItem>?>(null)
     /** 本机照片（不含网盘照片），给网盘模块用来判断哪些照片本机已经没了。 */
     val localItems: StateFlow<List<MediaItem>?> = _local.asStateFlow()
@@ -68,6 +105,20 @@ class GalleryController(
 
     private var watchJob: Job? = null
     private var cloudJob: Job? = null
+
+    private val motionIndex = MotionIndex(context, scope)
+
+    /** iPhone 实况照片：静态照片 id → 配对的 MOV（见 [MotionIndex.livePairs]）。 */
+    val livePairs: StateFlow<Map<Long, MediaItem>> = _library
+        .map { MotionIndex.livePairs(it.items + it.archived) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(scope, SharingStarted.Eagerly, emptyMap())
+
+    /** 要显示“动态”标记的照片：本机扫到的、网盘目录里标着的、实况照片。 */
+    val motionIds: StateFlow<Set<Long>> = combine(motionIndex.local, _library, livePairs) { local, lib, pairs ->
+        val cloud = lib.cloudOnly.filter { it.motion }
+        if (cloud.isEmpty() && pairs.isEmpty()) local else HashSet(local).apply { cloud.forEach { add(it.id) }; addAll(pairs.keys) }
+    }.flowOn(Dispatchers.Default).stateIn(scope, SharingStarted.Eagerly, emptySet())
 
     init {
         // 让 AI 能扫描只在网盘里的照片：把网盘缩略图解码成 Bitmap
@@ -152,9 +203,12 @@ class GalleryController(
     fun refresh() {
         scope.launch {
             val items = runCatching { repo.loadAll() }.getOrDefault(emptyList())
+            checkMediaVersion()
             applyPendingArchive(items)
             autoArchive(items)
             _local.value = items
+            motionIndex.scan(items)
+            snapshotArchive(items)
             ai.startIndexing(items + _cloud.value.orEmpty())
         }
     }
@@ -241,6 +295,35 @@ class GalleryController(
         prefs.edit().putStringSet(KEY, next.mapTo(HashSet()) { it.toString() }).remove(KEY_PENDING_ARCHIVE).apply()
     }
 
+    /**
+     * 系统媒体库重建过（清了“媒体存储”的数据、部分系统升级）：照片 id 从头编号，按 id 记的归档、
+     * AI 索引、敏感判定都会指到别的照片上。版本号变了就全部作废：归档按上次记下的“文件名|拍摄时间”重新对上。
+     */
+    private fun checkMediaVersion() {
+        if (android.os.Build.VERSION.SDK_INT < 29) return
+        val v = runCatching { android.provider.MediaStore.getVersion(context.applicationContext) }.getOrNull() ?: return
+        val old = prefs.getString(KEY_MEDIA_VERSION, null)
+        if (old == v) return
+        if (old != null) {
+            val keys = prefs.getStringSet(KEY_ARCHIVE_SNAPSHOT, emptySet())!!
+            _archived.value = emptySet()
+            kept = emptySet()
+            prefs.edit().putStringSet(KEY, emptySet()).putStringSet(KEY_KEPT, emptySet())
+                .putStringSet(KEY_PENDING_ARCHIVE, keys + prefs.getStringSet(KEY_PENDING_ARCHIVE, emptySet())!!).apply()
+            ai.forgetLocalIds()
+            sensitive.clearReveals()
+        }
+        prefs.edit().putString(KEY_MEDIA_VERSION, v).apply()
+    }
+
+    /** 记下归档照片的“文件名|拍摄时间”，媒体库重建后靠它找回。 */
+    private fun snapshotArchive(items: List<MediaItem>) {
+        val archived = _archived.value
+        if (archived.isEmpty() && !prefs.contains(KEY_ARCHIVE_SNAPSHOT)) return
+        val keys = items.filter { it.id in archived }.mapTo(HashSet(), ::archiveKey)
+        if (keys != prefs.getStringSet(KEY_ARCHIVE_SNAPSHOT, emptySet())) prefs.edit().putStringSet(KEY_ARCHIVE_SNAPSHOT, keys).apply()
+    }
+
     private fun archiveKey(item: MediaItem) = item.displayName + "|" + item.takenAt
 
     suspend fun trash(): List<MediaItem> = repo.loadTrash()
@@ -256,5 +339,7 @@ class GalleryController(
         const val KEY_SCREENSHOT_DAYS = "screenshotDays"
         const val KEY_PENDING_ARCHIVE = "pendingArchive"
         const val KEY_QUICK = "quickCollections"
+        const val KEY_MEDIA_VERSION = "mediaStoreVersion"
+        const val KEY_ARCHIVE_SNAPSHOT = "archiveSnapshot"
     }
 }

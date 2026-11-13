@@ -81,6 +81,17 @@ fun DiscoverScreen(
     val locked = access?.locked?.collectAsState()?.value ?: true
     // GitHub 版没有 AI；Play 免费版锁着：都按普通搜索来
     val aiOn = access != null && !locked && model == ModelState.Ready
+    // 不想用 AI 的人可以把卡片收起来，之后在“我的 › 端侧 AI 模型”里下载
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences(DISCOVER_PREFS, android.content.Context.MODE_PRIVATE) }
+    var cardHidden by remember { mutableStateOf(prefs.getBoolean(KEY_AI_CARD_HIDDEN, false)) }
+    val hideCard = {
+        prefs.edit().putBoolean(KEY_AI_CARD_HIDDEN, true).apply()
+        cardHidden = true
+        android.widget.Toast.makeText(context, tr(R.string.discover_ai_hidden_toast), android.widget.Toast.LENGTH_LONG).show()
+    }
+    // 用户自己点了下载（比如在“我的”里）：进度照样显示在这里
+    val busy = model is ModelState.Downloading || model == ModelState.Loading || switching != null || (model == ModelState.Ready && progress.running)
 
     LazyVerticalGrid(
         columns = GridCells.Adaptive(160.dp),
@@ -108,10 +119,10 @@ fun DiscoverScreen(
             )
         }
         if (access != null && locked) {
-            item(span = { GridItemSpan(maxLineSpan) }) { AiLockedCard(access.onUnlock) }
-        } else if (access != null) {
+            if (!cardHidden) item(span = { GridItemSpan(maxLineSpan) }) { AiLockedCard(access.onUnlock, hideCard) }
+        } else if (access != null && (!cardHidden || busy)) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                ModelCard(model, progress, choices, switching, { ai.install(it) }, ai::cancelInstall, onImportModel)
+                ModelCard(model, progress, choices, switching, { ai.install(it) }, ai::cancelInstall, onImportModel, hideCard)
             }
         }
         if (aiOn) {
@@ -160,12 +171,15 @@ private fun CategoryTile(
 
 /** Play 免费版：端侧 AI 是 Pro 功能。 */
 @Composable
-private fun AiLockedCard(onUnlock: () -> Unit) {
+private fun AiLockedCard(onUnlock: () -> Unit, onHide: () -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(tr(R.string.discover_ai_locked_title), style = MaterialTheme.typography.titleMedium)
             Text(tr(R.string.discover_ai_locked_body), style = MaterialTheme.typography.bodyMedium)
-            androidx.compose.material3.Button(onClick = onUnlock) { Text(tr(R.string.pro_buy)) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Button(onClick = onUnlock) { Text(tr(R.string.pro_buy)) }
+                TextButton(onClick = onHide) { Text(tr(R.string.discover_ai_hide)) }
+            }
         }
     }
 }
@@ -179,6 +193,7 @@ private fun ModelCard(
     onInstall: (String?) -> Unit,
     onCancel: () -> Unit,
     onImport: () -> Unit,
+    onHide: () -> Unit,
 ) {
     if (state == ModelState.Ready && !progress.running && switching == null) return
     var picked by remember(choices) { mutableStateOf(choices.defaultSelection()) }
@@ -219,6 +234,7 @@ private fun ModelCard(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { onInstall(picked) }) { Text(tr(R.string.discover_download_enable)) }
                         TextButton(onClick = onImport) { Text(tr(R.string.discover_import)) }
+                        TextButton(onClick = onHide) { Text(tr(R.string.discover_ai_hide)) }
                     }
                 }
                 is ModelState.Downloading -> DownloadRow(state, onCancel)
@@ -228,6 +244,7 @@ private fun ModelCard(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { onInstall(picked) }) { Text(tr(R.string.common_retry)) }
                         TextButton(onClick = onImport) { Text(tr(R.string.discover_import)) }
+                        TextButton(onClick = onHide) { Text(tr(R.string.discover_ai_hide)) }
                     }
                 }
                 ModelState.Ready -> {
@@ -256,6 +273,9 @@ private fun DownloadRow(state: ModelState.Downloading, onCancel: () -> Unit) {
         TextButton(onClick = onCancel) { Text(tr(R.string.common_cancel)) }
     }
 }
+
+private const val DISCOVER_PREFS = "discover"
+private const val KEY_AI_CARD_HIDDEN = "aiCardHidden"
 
 /** 分类在界面上显示的名字（[SmartCategory.title] 是给模型用的中文名）。 */
 val SmartCategory.displayTitle: String

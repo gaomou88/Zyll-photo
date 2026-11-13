@@ -41,11 +41,20 @@ class VectorIndex(val dim: Int) {
         size = entries.size
     }
 
+    /** 清空并预留 [capacity] 个位置：知道总数时一次分配好，免得边加边扩容（扩容时新旧两份同时占内存）。 */
+    @Synchronized
+    fun reset(capacity: Int) {
+        ids = LongArray(capacity)
+        data = FloatArray(capacity * dim)
+        size = 0
+    }
+
     @Synchronized
     fun add(id: Long, v: FloatArray) {
         require(v.size == dim)
         if (size == ids.size) {
-            val cap = maxOf(64, size * 2)
+            // 每次多 1/2：比翻倍少占一些峰值内存（扩容那一刻新旧两份同时存在）
+            val cap = maxOf(64, size + size / 2)
             ids = ids.copyOf(cap)
             data = data.copyOf(cap * dim)
         }
@@ -83,9 +92,18 @@ class VectorIndex(val dim: Int) {
     @Synchronized
     fun search(query: FloatArray, limit: Int = 300, relativeCutoff: Float = 0.06f, minScore: Float = 0.15f): List<Hit> {
         require(query.size == dim)
+        if (size == 0 || limit <= 0) return emptyList()
         val scores = FloatArray(size) { dot(query, data, it * dim) }
-        val order = scores.indices.sortedByDescending { scores[it] }.take(limit)
-        if (order.isEmpty()) return emptyList()
+        // 只留分数最高的 [limit] 个（小顶堆），不给全部结果装箱排序
+        val heap = java.util.PriorityQueue<Int>(limit + 1) { a, b -> scores[a].compareTo(scores[b]) }
+        for (i in 0 until size) {
+            if (heap.size < limit) heap.add(i)
+            else if (scores[i] > scores[heap.peek()!!]) {
+                heap.poll()
+                heap.add(i)
+            }
+        }
+        val order = heap.sortedByDescending { scores[it] }
         val best = scores[order.first()]
         return order.filter { scores[it] >= best - relativeCutoff && scores[it] >= minScore }
             .map { Hit(ids[it], scores[it]) }

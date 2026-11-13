@@ -26,6 +26,9 @@ data class ProviderConfig(
 }
 
 object CloudConfig {
+    /** drive.file：库搬到“我的云端硬盘”里的可见文件夹后要用，只能看到 Zyll 自己建的文件，不需要敏感权限审核。 */
+    const val GOOGLE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+
     /** 网盘里放备份的文件夹名。 */
     const val ROOT_FOLDER = "Zyll 相册"
 
@@ -44,6 +47,7 @@ object CloudConfig {
         redirectUri = "$SCHEME:/oauth2redirect",
         // drive.appdata：文件放在用户网盘的“应用数据”隐藏区（和 WhatsApp 备份一样），
         // 占用用户的空间，但在网盘里看不到、删不到；用户可以在“管理存储空间”里整体清除。
+        // 开分享功能时再另外申请 GOOGLE_FILE_SCOPE（见 CloudAuth.signInIntent 的 extraScopes），不用的人不多授权
         scopes = listOf("https://www.googleapis.com/auth/drive.appdata", "openid", "email"),
     )
 

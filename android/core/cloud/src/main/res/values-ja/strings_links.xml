@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="link_err_nothing">写真を1枚以上選んでください。</string>
+    <string name="link_err_encryption">リンクで共有できるのはエンドツーエンド暗号化されたバックアップだけです。先に暗号化をオンにして、このスマホでロックを解除してください。</string>
+    <string name="link_err_storage">先に Google アカウントの共有機能をオンにしてください。非表示領域のバックアップはリンクで共有できません。</string>
+    <string name="link_err_not_backed_up">これらの写真はまだ暗号化してバックアップされていません。バックアップしてからリンクを作成してください。</string>
+    <string name="link_err_password">パスワードは %1$d 文字以上にしてください。</string>
+    <string name="link_err_expiry">有効期限がすでに過ぎています。</string>
+    <string name="link_err_too_many">1つのリンクに入れられる写真は %1$d 枚までです。</string>
+    <string name="link_err_network">クラウドに接続できませんでした。何も共有されていません。もう一度お試しください。</string>
+    <string name="link_err_wiping">バックアップデータを削除中のため、今はリンクを作成できません。</string>
+    <string name="link_err_not_allowed">このアカウントでは公開リンクを作成できません（職場や学校のアカウントは管理者が制限していることがあります）。</string>
+</resources>

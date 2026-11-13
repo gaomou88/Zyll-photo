@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="link_err_nothing">請至少選一張相片。</string>
+    <string name="link_err_encryption">外部連結只能分享端對端加密的備份。請先開啟加密（並在這支手機上解鎖）。</string>
+    <string name="link_err_storage">請先為 Google 帳號開啟分享功能。隱藏區裡的備份不能用外部連結分享。</string>
+    <string name="link_err_not_backed_up">這些相片還沒有加密備份到雲端硬碟。先備份，再建立連結。</string>
+    <string name="link_err_password">密碼至少要 %1$d 個字元。</string>
+    <string name="link_err_expiry">有效期已經過了。</string>
+    <string name="link_err_too_many">一條連結最多放 %1$d 張相片。</string>
+    <string name="link_err_network">連不上雲端硬碟，什麼都沒有分享出去。請再試一次。</string>
+    <string name="link_err_wiping">正在刪除備份資料，現在不能建立連結。</string>
+    <string name="link_err_not_allowed">這個帳號不允許建立公開連結（公司或學校帳號常被管理員關閉）。</string>
+</resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pick_title">选择照片</string>
+    <string name="pick_title_multi">选择照片</string>
+    <string name="pick_selected">已选 %1$d 项</string>
+    <string name="pick_done">完成</string>
+    <string name="pick_cancel">取消</string>
+    <string name="pick_empty">这里没有可选的照片或视频。</string>
+    <string name="pick_clip_label">照片</string>
+    <string name="shared_err_awaiting_move">这些照片还没搬到可见文件夹，搬完才能放进共享相册。</string>
+</resources>

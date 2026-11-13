@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  动态照片的播放画面。用 TextureView：它跟着透明度一起淡入淡出，第一帧出来前也不会像 SurfaceView 那样先打一个黑洞。
+  这个画面类型只能在布局里设，所以单独放一个布局文件。
+-->
+<androidx.media3.ui.PlayerView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    app:surface_type="texture_view"
+    app:use_controller="false"
+    app:resize_mode="fit"
+    app:shutter_background_color="@android:color/transparent" />

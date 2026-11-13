@@ -6,6 +6,9 @@ import app.zyll.crypto.KeyBundle
 import app.zyll.crypto.Keys
 import app.zyll.crypto.Primitives
 import app.zyll.crypto.RecoveryKey
+import app.zyll.crypto.ShareIdentity
+import app.zyll.crypto.ShareLink
+import app.zyll.crypto.Sharing
 import app.zyll.crypto.Zylc
 import app.zyll.crypto.toHex
 import kotlinx.serialization.json.JsonArray
@@ -29,6 +32,8 @@ fun main(args: Array<String>) {
     write("primitives.json", primitives())
     write("zylc.json", zylc())
     write("keybundle.json", keybundle())
+    write("sharing.json", sharing())
+    write("share-link.json", shareLink())
     println("vectors written to ${dir.absolutePath}")
 }
 
@@ -165,6 +170,68 @@ private fun keybundle(): JsonObject = buildJsonObject {
             })
         }
     })
+}
+
+private fun sharing(): JsonObject = buildJsonObject {
+    val b64 = java.util.Base64.getEncoder()
+    put("description", "共享相册向量，见 spec/sharing.md。私钥都是固定字节，Ed25519 签名是确定性的")
+    val ids = listOf("owner", "member").associateWith { ShareIdentity(fixed("id-x-$it", 32), fixed("id-ed-$it", 32)) }
+    put("identities", buildJsonObject {
+        for ((name, id) in ids) put(name, buildJsonObject {
+            put("xPriv", id.xPriv.toHex()); put("edPriv", id.edPriv.toHex())
+            put("xPub", id.xPub.toHex()); put("edPub", id.edPub.toHex())
+            put("fingerprint", id.fpHex); put("safetyCode", Sharing.safetyCode(id.fingerprint))
+        })
+    })
+    val albumId = "11111111-2222-4333-8444-555555555555"
+    val ak = fixed("album-key", 32)
+    val epoch = 3
+    val member = ids["member"]!!
+    val ephPriv = fixed("seal-eph", 32)
+    val nonce = fixed("seal-nonce", 12)
+    val sealed = Sharing.sealAlbumKeyWith(ak, albumId, epoch, member.xPub, member.fpHex, ephPriv, nonce)
+    put("albumId", albumId); put("albumKey", ak.toHex()); put("epoch", epoch)
+    put("albumWrapKey", Sharing.albumWrapKey(ak, albumId).toHex())
+    put("seal", buildJsonObject {
+        put("recipient", "member"); put("ephPriv", ephPriv.toHex())
+        put("epk", b64.encodeToString(sealed.epk)); put("nonce", b64.encodeToString(sealed.nonce)); put("ct", b64.encodeToString(sealed.ct))
+    })
+    val body = """{"albumId":"$albumId","seq":1,"epoch":$epoch}""".toByteArray()
+    put("manifest", buildJsonObject {
+        put("signer", "owner")
+        put("body", b64.encodeToString(body))
+        put("sig", b64.encodeToString(Sharing.signManifest(body, ids["owner"]!!.edPriv)))
+    })
+    // 主人照片：用主人 K_wrap 加密；成员凭目录里的 DEK 解密
+    val kWrap = Keys.deriveWrapKey(fixed("mk", 32))
+    val dek = fixed("shared-photo-dek", 32)
+    val photo = Zylc.encryptWith(pattern(5000), BlobKind.ORIGINAL, kWrap, fixed("shared-photo-blob", 16), dek, fixed("shared-photo-nonce", 12), 12)
+    put("photo", buildJsonObject {
+        put("kWrap", kWrap.toHex()); put("dek", dek.toHex()); put("plainLen", 5000); put("kind", BlobKind.ORIGINAL.code)
+        put("ciphertext", photo.toHex())
+    })
+}
+
+private fun shareLink(): JsonObject = buildJsonObject {
+    val b64 = java.util.Base64.getEncoder()
+    put("description", "外链分享向量，见 spec/share-link.md。密码含非 ASCII 字符，先做 NFC 再取 UTF-8")
+    val secret = fixed("link-secret", ShareLink.SECRET_LEN)
+    // “e\u0301” NFC 后是 “é”：两端都要先规范化
+    val password = "Sea\u0301 2024 海边"
+    put("secret", secret.toHex())
+    put("password", password)
+    put("salt", ShareLink.salt(secret).toHex())
+    val k = ShareLink.linkKey(secret, password)
+    put("linkKey", k.toHex())
+    val g = ShareLink.Fragment(ShareLink.Provider.Google, "1AbC-dEf_GhIjK", secret)
+    put("fragmentGoogle", g.encode())
+    val url = "https://1drv.ms/u/s!AbCdEfGh?e=xyz"
+    put("oneDriveUrl", url)
+    put("fragmentOneDrive", ShareLink.Fragment(ShareLink.Provider.OneDrive, ShareLink.encodeUrlLoc(url), secret).encode())
+    val plain = """{"format":"zyll-link","version":1,"id":"00112233445566778899aabbccddeeff","title":"t","created":1,"expires":null,"originals":true,"items":[]}""".toByteArray()
+    val sealed = Zylc.encryptWith(plain, BlobKind.OTHER, k, fixed("link-blob", 16), fixed("link-dek", 32), fixed("link-nonce", 12), 12)
+    put("manifestPlain", b64.encodeToString(plain))
+    put("manifestSealed", sealed.toHex())
 }
 
 private fun String.hex(): ByteArray = ByteArray(length / 2) { substring(2 * it, 2 * it + 2).toInt(16).toByte() }

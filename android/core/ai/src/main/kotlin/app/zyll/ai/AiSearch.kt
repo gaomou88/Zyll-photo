@@ -71,16 +71,18 @@ class AiSearch(context: Context, sources: List<ModelSource>, scope: CoroutineSco
     val backgroundPaused = MutableStateFlow(false)
     var cloudThumbnailLoader: (suspend (MediaItem) -> Bitmap?)? = null
     val allowed: Boolean get() = false
+    val allowedState: StateFlow<Boolean> = MutableStateFlow(false)
     val installedFrom: String? get() = null
 
     fun setScanCloud(on: Boolean) = Unit
     fun setAllowed(on: Boolean) = Unit
     fun reloadChoices() = Unit
-    fun install(id: String? = null) = Unit
+    fun install(id: String? = null): Boolean = false
     fun cancelInstall() = Unit
     fun importFiles(uris: List<Uri>) = Unit
     fun remove() = Unit
     fun startIndexing(items: List<MediaItem>) = Unit
+    fun forgetLocalIds() = Unit
 
     fun resultsVersion(): Long = 0
     fun resultsModel(): String? = null

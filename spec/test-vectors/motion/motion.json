@@ -1,0 +1,153 @@
+{
+ "description": "动态照片识别测试向量，见 spec/motion-photo.md。quick = 不扫描；scan = 允许完整扫描。",
+ "vectors": [
+  {
+   "file": "google-motion.jpg",
+   "size": 2006,
+   "quick": {
+    "offset": 1258,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "scan": {
+    "offset": 1258,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "note": "Google Motion Photo v1：XMP Container 目录，视频在末尾"
+  },
+  {
+   "file": "google-motion-element.jpg",
+   "size": 2041,
+   "quick": {
+    "offset": 1293,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "scan": {
+    "offset": 1293,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "note": "XMP 用元素写法；moov 在 mdat 前"
+  },
+  {
+   "file": "microvideo.jpg",
+   "size": 1554,
+   "quick": {
+    "offset": 806,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "scan": {
+    "offset": 806,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "note": "旧 GCamera:MicroVideoOffset（小米等）"
+  },
+  {
+   "file": "ultrahdr-motion.jpg",
+   "size": 2438,
+   "quick": {
+    "offset": 1690,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "scan": {
+    "offset": 1690,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "note": "主图后面先是 Ultra HDR 增益图，再是视频"
+  },
+  {
+   "file": "samsung-sef.jpg",
+   "size": 1283,
+   "quick": {
+    "offset": 491,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "scan": {
+    "offset": 491,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "note": "三星：SEF 目录里的 MotionPhoto_Data"
+  },
+  {
+   "file": "pixel-mpvd.heic",
+   "size": 1136,
+   "quick": {
+    "offset": 388,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "scan": {
+    "offset": 388,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "note": "HEIC：顶层 mpvd 盒子"
+  },
+  {
+   "file": "appended-plain.jpg",
+   "size": 1180,
+   "quick": null,
+   "scan": {
+    "offset": 432,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "note": "没有元数据，只能扫描找到"
+  },
+  {
+   "file": "quicktime-brand.jpg",
+   "size": 2006,
+   "quick": {
+    "offset": 1258,
+    "length": 748,
+    "mime": "video/quicktime"
+   },
+   "scan": {
+    "offset": 1258,
+    "length": 748,
+    "mime": "video/quicktime"
+   },
+   "note": "ftyp 品牌是 qt：按 video/quicktime"
+  },
+  {
+   "file": "still-with-ftyp-bytes.jpg",
+   "size": 444,
+   "quick": null,
+   "scan": null,
+   "note": "普通照片：数据里有 ftyp 字样也不能误判"
+  },
+  {
+   "file": "wrong-length.jpg",
+   "size": 2006,
+   "quick": null,
+   "scan": {
+    "offset": 1258,
+    "length": 748,
+    "mime": "video/mp4"
+   },
+   "note": "XMP 写的长度不对：不能按它切；扫描找到真正位置"
+  },
+  {
+   "file": "truncated-video.jpg",
+   "size": 1898,
+   "quick": null,
+   "scan": null,
+   "note": "视频被截断（没有 moov）：不算动态照片"
+  },
+  {
+   "file": "plain.heic",
+   "size": 380,
+   "quick": null,
+   "scan": null,
+   "note": "普通 HEIC"
+  }
+ ]
+}

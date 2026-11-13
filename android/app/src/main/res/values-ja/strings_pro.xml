@@ -16,4 +16,5 @@
     <string name="cloud_media_title">クラウドメディアに接続</string>
     <string name="cloud_media_setting_active">接続済み · 他のアプリで Zyll のクラウドの写真を選べます</string>
     <string name="cloud_media_setting_off">他のアプリの写真選択で Zyll のクラウドの写真を表示</string>
+    <string name="cloud_media_setting_locked">選択済み · Pro を解除すると写真選択にクラウドの写真が表示されます</string>
 </resources>

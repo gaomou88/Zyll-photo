@@ -136,8 +136,26 @@ object Zylc {
         return decrypt(data, kWrap)
     }
 
-    fun decrypt(data: ByteArray, kWrap: ByteArray): ByteArray {
-        val reader = Reader.open(data.copyOfRange(0, minOf(HEADER_LEN, data.size)), kWrap)
+    fun decrypt(data: ByteArray, kWrap: ByteArray): ByteArray =
+        decryptWith(data, Reader.open(data.copyOfRange(0, minOf(HEADER_LEN, data.size)), kWrap))
+
+    /**
+     * 共享相册的成员用相册目录里给的 DEK 直接解密，不需要文件头里那份（它是用主人的 K_wrap 包的）。
+     * 头部仍参与每块的 AAD，头被改过一样会失败。见 spec/sharing.md 4.2。
+     */
+    fun decryptWithDek(data: ByteArray, dek: ByteArray, expect: BlobKind): ByteArray {
+        val reader = Reader.openWithDek(data.copyOfRange(0, minOf(HEADER_LEN, data.size)), dek)
+        if (reader.header.kind != expect) throw ZyllCryptoException("unexpected blob kind ${reader.header.kind}")
+        return decryptWith(data, reader)
+    }
+
+    /** 主人取出某个文件的 DEK，用来写进共享相册目录。只需要文件的前 92 字节。 */
+    fun unwrapDek(headerBytes: ByteArray, kWrap: ByteArray): ByteArray {
+        val h = ZylcHeader.decode(headerBytes)
+        return Primitives.aesGcmDecrypt(kWrap, h.wrapNonce, h.wrappedDek, headerBytes.copyOfRange(0, 24))
+    }
+
+    private fun decryptWith(data: ByteArray, reader: Reader): ByteArray {
         val h = reader.header
         if (data.size.toLong() != h.totalLen) throw ZyllCryptoException("length mismatch")
         if (h.plainLen > Int.MAX_VALUE) throw ZyllCryptoException("too large for in-memory decrypt")
@@ -162,10 +180,13 @@ object Zylc {
         }
 
         companion object {
-            fun open(headerBytes: ByteArray, kWrap: ByteArray): Reader {
+            fun open(headerBytes: ByteArray, kWrap: ByteArray): Reader =
+                openWithDek(headerBytes, unwrapDek(headerBytes, kWrap))
+
+            fun openWithDek(headerBytes: ByteArray, dek: ByteArray): Reader {
+                if (dek.size != Primitives.KEY_LEN) throw ZyllCryptoException("bad dek")
                 val h = ZylcHeader.decode(headerBytes)
-                val dek = Primitives.aesGcmDecrypt(kWrap, h.wrapNonce, h.wrappedDek, headerBytes.copyOfRange(0, 24))
-                return Reader(h, dek, Primitives.sha256(headerBytes.copyOfRange(0, HEADER_LEN)))
+                return Reader(h, dek.copyOf(), Primitives.sha256(headerBytes.copyOfRange(0, HEADER_LEN)))
             }
         }
     }

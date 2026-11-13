@@ -55,6 +55,10 @@ class CloudProviderTest {
         assertTrue(AccountLimits.PRO.canAdd(DriveKind.GoogleDrive, listOf(g, o)))
         assertFalse(AccountLimits.SINGLE.canAdd(DriveKind.OneDrive, listOf(g)))
         assertTrue(AccountLimits.SINGLE.canAdd(DriveKind.OneDrive, emptyList()))
+        // Pro：每种最多 4 个
+        val fourG = (0 until 4).map { CloudProvider.of(DriveKind.GoogleDrive, it) }
+        assertFalse(AccountLimits.PRO.canAdd(DriveKind.GoogleDrive, fourG))
+        assertTrue(AccountLimits.PRO.canAdd(DriveKind.OneDrive, fourG))
     }
 
     @Test

@@ -51,6 +51,7 @@ SHA-256 when the `ZYLL_KEYSTORE_BASE64` secret and the other three are set.
 | Path | Contents |
 | --- | --- |
 | `spec/` | Encrypted container format, key bundle, cloud layout, shared test vectors |
+| `packages/crypto` | Encryption core in TypeScript (the same code the web app uses), tested against `spec/test-vectors` |
 | `android/core/crypto` | Encryption core (pure JVM, tested against `spec/test-vectors`) |
 | `android/core/backup` | Backup rules (pure JVM, unit tested) |
 | `android/core/cloud` | Google Drive / OneDrive clients and background backup |
@@ -60,6 +61,9 @@ SHA-256 when the `ZYLL_KEYSTORE_BASE64` secret and the other three are set.
 ```bash
 # Encryption core without the Android SDK
 cd android && ./gradlew -Pzyll.jvmOnly :core:crypto:test
+
+# TypeScript encryption core (Node 20+, pnpm)
+pnpm install && pnpm test
 ```
 
 ---

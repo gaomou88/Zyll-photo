@@ -51,6 +51,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -59,9 +60,12 @@ import java.lang.ref.WeakReference
 
 /** 进程内共享的对象：媒体库和 AI 只各建一份，旋转屏幕、重进 Activity 都不重建。 */
 object AppGraph {
-    private var controller: GalleryController? = null
+    @Volatile private var controller: GalleryController? = null
     private var backup: CloudBackupIndicator? = null
     private var currentActivity = WeakReference<Activity>(null)
+
+    /** 已经建好的就返回，没建好不建（系统照片选择器的调用线程上不能做这么重的事）。 */
+    fun controllerIfBuilt(): GalleryController? = controller
 
     fun setActivity(a: Activity?) {
         currentActivity = WeakReference(a)
@@ -79,6 +83,7 @@ object AppGraph {
             backup = b
             GalleryImages.cloudFiles = b
             c.attachCloud(b.cloudItems)
+            FlavorServices.attachPicker(app, c)
             // 所有界面（相册、编辑器、裁剪）都算在内：全部退到后台才算离开 App
             (app as android.app.Application).registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
                 override fun onActivityStarted(activity: Activity) = AppGraph.onActivityStarted(app)
@@ -127,23 +132,52 @@ object AppGraph {
 
 class MainActivity : ComponentActivity() {
     private var mePage by mutableStateOf<MePage?>(null)
+    /** 加密页是从备份页点进来的：返回时回到备份页，不是“我的”首页。 */
+    private var encryptionFromBackup = false
     private val openMe = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    private val openCloudOnly = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private val openUri = MutableSharedFlow<android.net.Uri>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private var openedForView = false
 
     private fun handleView(intent: Intent?): Boolean {
         val uri = intent?.data
         if (intent?.action != Intent.ACTION_VIEW || uri == null) return false
+        // 别的 App 让我们“打开”一个地址：不能借这个读到 App 自己的私有文件（缓存里解密后的网盘照片、模型、密钥等）
+        if (!safeToView(uri)) {
+            // 不说一声的话，用户只看到相册首页，不知道文件为什么没打开
+            android.widget.Toast.makeText(this, app.zyll.media.tr(R.string.view_unsupported_file), android.widget.Toast.LENGTH_SHORT).show()
+            return false
+        }
         openedForView = true
         openUri.tryEmit(uri)
         return true
+    }
+
+    private fun safeToView(uri: android.net.Uri): Boolean = when (uri.scheme?.lowercase()) {
+        "content" -> {
+            // 自己的 FileProvider / 内容提供者指向的是私有目录，外面传进来的一律不认。
+            // 按 host 比（authority 可以带“0@”这种用户前缀绕过前缀比较），host 为空的也不认
+            val host = uri.host?.lowercase()
+            host != null && host != packageName.lowercase() && !host.startsWith(packageName.lowercase() + ".")
+        }
+        "file" -> {
+            val path = runCatching { java.io.File(uri.path ?: "").canonicalPath }.getOrNull()
+            val privateDirs = listOfNotNull(dataDir, filesDir, cacheDir, codeCacheDir, noBackupFilesDir, externalCacheDir, getExternalFilesDir(null))
+                .mapNotNull { runCatching { it.canonicalPath }.getOrNull() }
+            path != null && privateDirs.none { path == it || path.startsWith("$it/") }
+        }
+        else -> false
     }
 
     private var entitlements: Entitlements? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
+        lastNightMode = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
         super.onCreate(savedInstanceState)
+        // 系统回收后重建：回到原来的设置子页面
+        savedInstanceState?.getString(STATE_ME_PAGE)?.let { name -> mePage = MePage.entries.firstOrNull { it.name == name } }
+        encryptionFromBackup = savedInstanceState?.getBoolean(STATE_ENC_FROM_BACKUP) ?: false
         GalleryImages.install(this)
         val entitlements = FlavorServices.entitlements(applicationContext).also { this.entitlements = it }
         val controller = AppGraph.controller(this)
@@ -156,16 +190,21 @@ class MainActivity : ComponentActivity() {
                 cloud.limits = FlavorServices.accountLimits(pro)
                 aiLocked.value = FlavorServices.HAS_AI && !pro
                 controller.ai.setAllowed(FlavorServices.HAS_AI && pro)
+                // 系统照片选择器里的网盘照片也是 Pro 功能
+                cloud.pickerLocked = !pro
             }
         }
-        cloud.schedule()
-        // 打开 App 时补跑一轮；之后的新照片由系统媒体库变化触发，合并一段时间再备份，省电
-        if (savedInstanceState == null && cloud.settings.value.enabled) cloud.backupNow()
-        handleView(intent)
-        if (intent?.action == ACTION_OPEN_BACKUP) {
-            mePage = MePage.Backup
-            openMe.tryEmit(Unit)
+        // 同意使用条款之前不在后台处理数据：定时备份、补跑一轮都等同意以后（见 LegalConsentGate 的 onAccepted）
+        if (app.zyll.gallery.settings.hasLegalConsent(this)) {
+            cloud.schedule()
+            // 打开 App 时补跑一轮；之后的新照片由系统媒体库变化触发，合并一段时间再备份，省电
+            if (savedInstanceState == null && cloud.settings.value.enabled) cloud.backupNow()
+        } else {
+            cloud.stopBackgroundWork()
         }
+        handleView(intent)
+        // 重建时 intent 还是原来那个，设置子页面已经从保存的状态恢复：不再重新打开
+        if (savedInstanceState == null) openPageFor(intent)
 
         val hooks = GalleryHooks(
             // 修图是 Play 版功能，免费用户也能用（Pro 只解锁多账号、端侧 AI 和接入云端媒体）
@@ -192,26 +231,48 @@ class MainActivity : ComponentActivity() {
                         MePage.Backup -> {
                             BackHandler { mePage = null }
                             val library by controller.library.collectAsState()
-                            BackupScreen(cloud, library.albums, padding, onBack = { mePage = null }, onOpenEncryption = { mePage = MePage.Encryption })
+                            BackupScreen(cloud, library.albums, padding, onBack = { mePage = null }, onOpenEncryption = {
+                                encryptionFromBackup = true
+                                mePage = MePage.Encryption
+                            }, onOpenCloudOnly = {
+                                mePage = null
+                                openCloudOnly.tryEmit(Unit)
+                            })
                         }
                         MePage.Encryption -> {
-                            BackHandler { mePage = null }
-                            EncryptionScreen(cloud, padding, onBack = { mePage = null })
+                            val back = {
+                                mePage = if (encryptionFromBackup) MePage.Backup else null
+                                encryptionFromBackup = false
+                            }
+                            BackHandler { back() }
+                            EncryptionScreen(cloud, padding, onBack = back)
                         }
                         MePage.Sensitive -> {
                             BackHandler { mePage = null }
-                            SensitiveScreen(controller.sensitive, controller.ai, padding, onBack = { mePage = null })
+                            SensitiveScreen(
+                                controller.sensitive, controller.ai, padding, onBack = { mePage = null },
+                                pickerSetting = { FlavorServices.PickerBlurSetting(controller.sensitive, entitlements, onOpenCloudMedia = { mePage = MePage.CloudMedia }) },
+                                onUnlock = { if (!entitlements.purchase(this@MainActivity)) Toast.makeText(this@MainActivity, getString(R.string.pro_unavailable), Toast.LENGTH_LONG).show() },
+                            )
+                        }
+                        MePage.Shared -> {
+                            BackHandler { mePage = null }
+                            app.zyll.gallery.settings.SharedAlbumsScreen(cloud, padding, onBack = { mePage = null }, onOpenBackup = { mePage = MePage.Backup })
                         }
                         MePage.About -> {
                             BackHandler { mePage = null }
-                            AboutScreen(entitlements.hasEditor, padding, onBack = { mePage = null })
+                            AboutScreen(entitlements, padding, onBack = { mePage = null })
                         }
                     }
                 }
             },
             backup = AppGraph.backup(this),
             onOpenBackup = { mePage = MePage.Backup },
-            openMe = openMe,
+            onOpenShared = { mePage = MePage.Shared },
+            // 只用一次：处理完就清掉，界面重建时不会又跳到“我的”
+            openMe = openMe.onEach { openMe.resetReplayCache() },
+            openCloudOnly = openCloudOnly,
+            meSubpage = androidx.compose.runtime.derivedStateOf { mePage != null },
             openUri = openUri,
             onExternalDone = { if (openedForView) finish() },
             ai = if (FlavorServices.HAS_AI) {
@@ -229,20 +290,60 @@ class MainActivity : ComponentActivity() {
         setContent {
             ZyllTheme {
                 Surface(Modifier.fillMaxSize()) {
-                    GalleryApp(controller, hooks)
+                    // 第一次打开先同意使用条款和隐私政策；不同意就关掉
+                    app.zyll.gallery.settings.LegalConsentGate(
+                        onDecline = { cloud.stopBackgroundWork(); finishAndRemoveTask() },
+                        onAccepted = {
+                            cloud.schedule()
+                            if (cloud.settings.value.enabled) cloud.backupNow()
+                        },
+                    ) {
+                        GalleryApp(controller, hooks)
+                        app.zyll.gallery.settings.PendingRecoveryKey(cloud)
+                        // 删除全部备份数据在后台做完时，不管在哪个页面都提示一次
+                        app.zyll.gallery.settings.WipeFinishedNotice(cloud)
+                        // 开着分享功能的 Google 账号还没授权读写可见文件夹：哪个页面都强制弹出，必须授权或断开
+                        app.zyll.gallery.settings.SharingScopeGate(cloud)
+                    }
                 }
             }
         }
+    }
+
+    private var lastNightMode = 0
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // 深色模式切换不再重建界面：系统栏图标颜色要跟着重新设一次。只在深浅色真的变了时设，转屏时不动（大图页自己管图标颜色）
+        val night = newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        if (night != lastNightMode) {
+            lastNightMode = night
+            enableEdgeToEdge()
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        mePage?.let { outState.putString(STATE_ME_PAGE, it.name) }
+        outState.putBoolean(STATE_ENC_FROM_BACKUP, encryptionFromBackup)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleView(intent)
-        if (intent.action == ACTION_OPEN_BACKUP) {
-            mePage = MePage.Backup
-            openMe.tryEmit(Unit)
+        openPageFor(intent)
+    }
+
+    /** 从系统照片选择器点进来：打开网盘设置，或（没解锁时）“接入云端媒体”页。 */
+    private fun openPageFor(intent: Intent?) {
+        val page = when (intent?.action) {
+            ACTION_OPEN_BACKUP -> MePage.Backup
+            ACTION_OPEN_CLOUD_MEDIA -> if (FlavorServices.HAS_CLOUD_MEDIA) MePage.CloudMedia else MePage.Backup
+            else -> return
         }
+        mePage = page
+        openMe.tryEmit(Unit)
     }
 
     override fun onResume() {
@@ -258,5 +359,8 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_OPEN_BACKUP = "com.zyll.photo.OPEN_BACKUP"
+        const val ACTION_OPEN_CLOUD_MEDIA = "com.zyll.photo.OPEN_CLOUD_MEDIA"
+        private const val STATE_ME_PAGE = "mePage"
+        private const val STATE_ENC_FROM_BACKUP = "encFromBackup"
     }
 }

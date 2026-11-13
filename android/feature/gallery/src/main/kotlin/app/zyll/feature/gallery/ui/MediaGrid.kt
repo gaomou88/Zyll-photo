@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.MotionPhotosOn
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -64,6 +65,10 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.SideEffect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -117,25 +122,22 @@ fun MediaGrid(
     state: LazyGridState = rememberLazyGridState(),
     header: (LazyGridScope.() -> Unit)? = null,
 ) {
-    val sections = remember(items, density.byMonth, grouped) {
-        if (grouped) group(items, density.byMonth) else listOf(Section("all", "", null, items))
+    // 分组在后台线程算（见 GridLayouts）；同一个列表算过的直接用，没算好之前先显示这个网格上一次的布局
+    val hasHeader = header != null
+    val layout by produceState(
+        initialValue = GridLayouts.peek(items, density.byMonth, grouped, hasHeader) ?: GridPositions.last(state),
+        items, density.byMonth, grouped, hasHeader,
+    ) {
+        value = GridLayouts.peek(items, density.byMonth, grouped, hasHeader)
+            ?: withContext(Dispatchers.Default) { GridLayouts.compute(items, density.byMonth, grouped, hasHeader) }
     }
+    val sections = layout?.sections.orEmpty()
     // 网格里每个位置对应的照片（分组标题处为 null），给快速滚动条显示日期用
-    val flat = remember(sections, header) {
-        buildList<MediaItem?> {
-            if (header != null) add(null)
-            sections.forEach { s ->
-                if (s.title.isNotEmpty()) add(null)
-                addAll(s.items)
-            }
-        }
-    }
+    val flat = layout?.flat.orEmpty()
+    layout?.let { l -> SideEffect { GridPositions.attach(state, l) } }
     val selecting = selection.isNotEmpty()
     // 照片在网格里的先后顺序，长按拖动时按这个顺序选一整段
-    val order = remember(sections) {
-        val ids = sections.flatMap { s -> s.items.map { it.id } }
-        ids to ids.withIndex().associate { (i, id) -> id to i }
-    }
+    val order = remember(layout) { layout?.let { it.ids to it.indexOf } ?: (emptyList<Long>() to emptyMap()) }
     val latestSelection by rememberUpdatedState(selection)
     val latestChange by rememberUpdatedState(onSelectionChange)
     var autoScroll by remember { mutableFloatStateOf(0f) }
@@ -165,6 +167,8 @@ fun MediaGrid(
     val baseConfig = LocalViewConfiguration.current
     val quickPress = remember(baseConfig) { QuickLongPress(baseConfig) }
     Box(modifier.pinchToChangeDensity(density, onDensityChange)) {
+        // 第一次的布局还没算出来：先不放网格。用空列表测量会把保存的滚动位置（含大图里请求的位置）清零
+        if (layout == null) return@Box
         CompositionLocalProvider(LocalViewConfiguration provides quickPress) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(density.columns),
@@ -272,6 +276,7 @@ private fun Tile(
     val notBackedUp = flags?.let { f ->
         remember(item.id, f) { derivedStateOf { f.showBackup.value && item.id !in f.backedUp.value } }.value
     } == true
+    val motion = !item.isVideo && flags?.motion?.let { m -> remember(item.id, m) { derivedStateOf { item.id in m.value } }.value } == true
     // 选中动画只改绘制层（缩放 + 圆角），不触发重新布局
     val scale by animateFloatAsState(if (selected) 0.84f else 1f, label = "scale")
     val corner by animateDpAsState(if (selected) 10.dp else 0.dp, label = "corner")
@@ -286,6 +291,8 @@ private fun Tile(
             model = thumbModel(item),
             contentDescription = item.displayName,
             contentScale = ContentScale.Crop,
+            // 网盘照片没有宽高：从缩略图量出来，打开大图时的放大动画要用
+            onSuccess = { s -> MediaAspects.record(item, s.result.image.width, s.result.image.height) },
             modifier = Modifier.fillMaxSize().sharedMedia(item.id).sensitiveBlur(hidden).graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -327,10 +334,24 @@ private fun Tile(
                 modifier = Modifier.align(Alignment.TopEnd).padding(5.dp).size(14.dp),
             )
         }
-        if (item.isFavorite && !compact) {
+        if (!compact) {
+            // 收藏 / 取消收藏时角上的小心形淡入淡出
+            androidx.compose.animation.AnimatedVisibility(
+                visible = shownFavorite(item),
+                enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.6f),
+                exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.scaleOut(targetScale = 0.8f),
+                modifier = Modifier.align(Alignment.BottomStart),
+            ) {
+                Icon(
+                    Icons.Filled.Favorite, tr(R.string.viewer_favorited), tint = Color.White,
+                    modifier = Modifier.padding(5.dp).size(14.dp),
+                )
+            }
+        }
+        if (motion && !compact && !selecting) {
             Icon(
-                Icons.Filled.Favorite, tr(R.string.viewer_favorited), tint = Color.White,
-                modifier = Modifier.align(Alignment.BottomStart).padding(5.dp).size(14.dp),
+                Icons.Outlined.MotionPhotosOn, tr(R.string.motion_photo), tint = Color.White,
+                modifier = Modifier.align(Alignment.TopStart).padding(5.dp).size(15.dp),
             )
         }
         if (selecting) {
@@ -489,7 +510,8 @@ private fun FastScroller(state: LazyGridState, flat: List<MediaItem?>, modifier:
             ) {
                 AnimatedVisibility(dragging, enter = fadeIn(), exit = fadeOut()) {
                     val index = (dragFraction * (total - state.layoutInfo.visibleItemsInfo.size).coerceAtLeast(0)).roundToInt()
-                    val label = flat.getOrNull(index) ?: flat.drop(index).firstOrNull { it != null }
+                    // 标题位置往后找第一张照片（不复制列表，拖动时每帧都会算）
+                    val label = flat.getOrNull(index) ?: (index until flat.size).firstNotNullOfOrNull { flat[it] }
                     if (label != null) {
                         Surface(
                             color = MaterialTheme.colorScheme.secondaryContainer,

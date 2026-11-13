@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="links_title">分享連結</string>
+    <string name="links_empty">還沒有分享連結。在相簿裡選好照片，點「分享」，再點「建立連結」。</string>
+    <string name="links_count">%1$d 項</string>
+    <string name="links_forever">永久有效</string>
+    <string name="links_until">%1$s 失效</string>
+    <string name="links_expired">已過期</string>
+    <string name="links_originals_on">可下載原圖</string>
+    <string name="links_originals_off">不能下載</string>
+    <string name="links_copy">複製連結</string>
+    <string name="links_copied">連結已複製</string>
+    <string name="links_revoke">撤銷</string>
+    <string name="links_revoking">撤銷中…</string>
+    <string name="links_revoke_title">撤銷這個連結？</string>
+    <string name="links_revoke_body">撤銷後連結馬上打不開，照片副本會刪掉。已經被看過、下載過的照片收不回來。</string>
+    <string name="links_revoked">連結已撤銷，副本已刪掉。已經被看過、下載過的照片收不回來。</string>
+    <string name="sharing_off_links_title">請先撤銷分享連結</string>
+    <string name="sharing_off_links_body">還有 %1$d 個分享連結在使用這個雲端硬碟裡的照片。關閉分享前，請先到「我的 → 共享相簿 → 分享連結」裡把它們撤銷。</string>
+    <string name="links_send">傳送</string>
+</resources>

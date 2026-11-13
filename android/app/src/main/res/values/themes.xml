@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 窗口背景和 ZyllTheme 的浅色背景一致：Compose 第一帧出来之前不会闪别的颜色 -->
+    <style name="Theme.Zyll" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/zyll_window_bg</item>
+    </style>
+    <color name="zyll_window_bg">#FFF8F6F1</color>
+</resources>

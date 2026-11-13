@@ -36,6 +36,28 @@ fun thumbModel(item: MediaItem): Any = when {
     else -> item.uri
 }
 
+/**
+ * 照片的显示宽高比。本机照片带着宽高；只在网盘里的照片目录里没有宽高，就用加载过的缩略图量出来记下
+ * （缩略图是按原比例缩的）。打开大图的放大动画靠它算出“长”成多大，没有它就只能整屏淡入，看着像没有动画。
+ */
+object MediaAspects {
+    private val known = java.util.concurrent.ConcurrentHashMap<Long, Float>()
+
+    fun of(item: MediaItem): Float? = item.displayAspect ?: known[item.id]
+
+    fun record(item: MediaItem, width: Int, height: Int) {
+        if (item.displayAspect != null || width <= 0 || height <= 0) return
+        if (known.size > 20_000) known.clear()
+        known[item.id] = width / height.toFloat()
+    }
+}
+
+/**
+ * 大图垫底的那张缩略图要的尺寸。和网格格子取的是同一档（见 [MediaThumbFetcher]：大于 256 一律取 512），
+ * 打开大图时直接用网格已经解好的那张，动画第一帧就有图，不用再加载一次。
+ */
+const val BACKDROP_THUMB_PX = 384
+
 /** 大图用的模型：本机照片直接用 uri，只在网盘里的照片先下载。 */
 fun fullModel(item: MediaItem): Any = if (item.isCloud) CloudImage(item.uri, thumb = false, mime = item.mimeType) else item.uri
 
@@ -45,6 +67,9 @@ data class CloudImage(val uri: Uri, val thumb: Boolean, val mime: String)
 /** App 提供：把网盘照片（或它的缩略图）变成本地文件。 */
 interface CloudFiles {
     suspend fun file(uri: Uri, thumb: Boolean): File
+
+    /** 同 [file]，下载原图时把 0..1 的进度报给 [onProgress]（不支持的实现不报）。 */
+    suspend fun file(uri: Uri, thumb: Boolean, onProgress: (Float) -> Unit): File = file(uri, thumb)
 }
 
 private class CloudImageFetcher(private val data: CloudImage) : Fetcher {

@@ -16,4 +16,5 @@
     <string name="cloud_media_title">連接雲端媒體</string>
     <string name="cloud_media_setting_active">已連接 · 其他應用程式選圖時可以直接選 Zyll 雲端硬碟中的相片</string>
     <string name="cloud_media_setting_off">讓其他應用程式選圖時也能看到 Zyll 雲端硬碟中的相片</string>
+    <string name="cloud_media_setting_locked">已選用 · 解鎖 Pro 後，選圖時會顯示雲端相片</string>
 </resources>

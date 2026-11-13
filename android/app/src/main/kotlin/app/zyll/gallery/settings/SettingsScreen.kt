@@ -24,6 +24,7 @@ import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Redeem
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.WorkspacePremium
@@ -44,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.res.stringResource
@@ -71,7 +73,7 @@ import app.zyll.media.WriteResult
 import app.zyll.media.MediaRepository
 import app.zyll.media.tr
 
-enum class MePage { CloudMedia, Backup, Encryption, Sensitive, About }
+enum class MePage { CloudMedia, Backup, Encryption, Sensitive, About, Shared }
 
 @Composable
 fun SettingsScreen(
@@ -95,12 +97,17 @@ fun SettingsScreen(
     val pro by entitlements.proUnlocked.collectAsState()
     var confirmRemove by remember { mutableStateOf(false) }
     var pickModel by remember { mutableStateOf(false) }
+    var downloadModel by remember { mutableStateOf(false) }
+    val importModel = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) ai.importFiles(uris)
+    }
     val choices by ai.choices.collectAsState()
     val currentModel by ai.currentId.collectAsState()
     val switchError by ai.switchError.collectAsState()
     val switching by ai.switching.collectAsState()
     val encryption by cloud.encryption.collectAsState()
     val sensitiveOn by sensitive.enabled.collectAsState()
+    val sensitivePaused by sensitive.pausedUntil.collectAsState()
     val sensitiveIds by ai.sensitiveIds.collectAsState()
     val lib by gallery.library.collectAsState()
     val settings by cloud.settings.collectAsState()
@@ -119,9 +126,43 @@ fun SettingsScreen(
     val allBuckets = lib.albums.map { it.bucketId }
     val skipped = settings.albumRules.filterValues { it == AlbumRule.Skip }.keys
     val backupAll = allBuckets.none { it in skipped }
-    val deleteLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
-        if (res.resultCode == Activity.RESULT_OK) Toast.makeText(context, tr(R.string.free_space_done), Toast.LENGTH_SHORT).show()
+    // 释放空间：Android 11 起先进回收站（还占空间），成功后说明一下并给“现在清空”；清空或旧系统直接删除后才算释放
+    var freeTrashed by remember { mutableStateOf<List<app.zyll.media.MediaItem>?>(null) }
+    var pendingTrash by remember { mutableStateOf<List<app.zyll.media.MediaItem>?>(null) }
+    fun afterFreed(items: List<app.zyll.media.MediaItem>, trashed: Boolean) {
+        if (trashed && app.zyll.feature.gallery.ui.freeUpUsesTrash()) freeTrashed = items
+        else Toast.makeText(context, tr(R.string.free_space_done), Toast.LENGTH_SHORT).show()
     }
+    // 照片很多时分批确认：这一批确认后接着弹下一批
+    var deleteQueue by remember { mutableStateOf<List<android.app.PendingIntent>>(emptyList()) }
+    // 前面的批次确认过、后面取消：已经处理了一部分，按部分完成提示（同 GalleryApp 的 writeBatchesOk）
+    var deleteBatchesOk by remember { mutableIntStateOf(0) }
+    lateinit var launchDelete: (android.app.PendingIntent) -> Unit
+    val deleteLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
+        val next = deleteQueue.firstOrNull()
+        if (res.resultCode == Activity.RESULT_OK && next != null) {
+            deleteBatchesOk++
+            deleteQueue = deleteQueue.drop(1)
+            launchDelete(next)
+            return@rememberLauncherForActivityResult
+        }
+        val partial = res.resultCode != Activity.RESULT_OK && deleteBatchesOk > 0
+        val doneCount = deleteBatchesOk * app.zyll.media.MEDIA_REQUEST_BATCH
+        val ok = res.resultCode == Activity.RESULT_OK || partial
+        deleteBatchesOk = 0
+        deleteQueue = emptyList()
+        // 分批是按列表顺序切的：部分完成时，做完的就是前面那几批
+        val trashed = pendingTrash?.let { if (partial) it.take(doneCount) else it }
+        pendingTrash = null
+        if (partial) {
+            Toast.makeText(context, tr(app.zyll.feature.gallery.R.string.confirm_partly_done, doneCount), Toast.LENGTH_SHORT).show()
+        }
+        if (ok) {
+            if (trashed != null) afterFreed(trashed, trashed = true)
+            else if (!partial) Toast.makeText(context, tr(R.string.free_space_done), Toast.LENGTH_SHORT).show()
+        }
+    }
+    launchDelete = { deleteLauncher.launch(IntentSenderRequest.Builder(it).build()) }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
@@ -159,11 +200,15 @@ fun SettingsScreen(
                 onClick = when {
                     switching != null || model is ModelState.Downloading -> ({ ai.cancelInstall() })
                     model == ModelState.Ready -> ({ pickModel = true })
+                    // 没装或上次失败：在这里也能直接下载（发现页的卡片可能被用户收起来了）
+                    model is ModelState.NotInstalled || model is ModelState.Failed -> ({ downloadModel = true })
                     else -> null
                 },
                 action = if (switching != null) tr(R.string.common_cancel_download) else when (model) {
                     ModelState.Ready -> tr(R.string.common_manage)
                     is ModelState.Downloading -> tr(R.string.common_cancel)
+                    is ModelState.NotInstalled -> tr(R.string.settings_ai_download)
+                    is ModelState.Failed -> tr(R.string.common_retry)
                     else -> null
                 },
             )
@@ -190,6 +235,7 @@ fun SettingsScreen(
                 indent = true,
             ) { on -> cloud.update { it.copy(backupNewAlbums = on) } }
             Item(Icons.Outlined.Lock, tr(R.string.settings_e2ee), encryptionSummary(encryption)) { onOpen(MePage.Encryption) }
+            Item(Icons.Outlined.PhotoLibrary, tr(R.string.shared_title), tr(R.string.shared_settings_hint)) { onOpen(MePage.Shared) }
             Item(
                 Icons.Outlined.CleaningServices,
                 tr(R.string.settings_free_space),
@@ -211,8 +257,10 @@ fun SettingsScreen(
                 Icons.Outlined.VisibilityOff,
                 tr(R.string.settings_sensitive),
                 when {
+                    model != ModelState.Ready && !sensitiveOn -> tr(R.string.settings_sensitive_need_model)
                     !sensitiveOn -> tr(R.string.settings_sensitive_off)
                     model != ModelState.Ready -> tr(R.string.settings_sensitive_wait)
+                    sensitivePaused > 0 -> tr(R.string.settings_sensitive_paused)
                     else -> tr(R.string.settings_sensitive_on, sensitiveIds.size)
                 },
             ) { onOpen(MePage.Sensitive) }
@@ -230,7 +278,14 @@ fun SettingsScreen(
                 Item(
                     Icons.Outlined.PhotoLibrary,
                     stringResource(R.string.cloud_media_title),
-                    stringResource(if (pickerOk) R.string.cloud_media_setting_active else R.string.cloud_media_setting_off),
+                    stringResource(
+                        when {
+                            !pickerOk -> R.string.cloud_media_setting_off
+                            // 已经选了 Zyll 但没解锁：选择器里不会有照片，提醒一下
+                            PRO_LOCK_ENABLED && !pro -> R.string.cloud_media_setting_locked
+                            else -> R.string.cloud_media_setting_active
+                        },
+                    ),
                 ) { onOpen(MePage.CloudMedia) }
             }
         }
@@ -255,6 +310,16 @@ fun SettingsScreen(
                         }
                     }),
                 )
+                // 兑换代码：在 Google Play 里输入，回到 App 时 onResume 会重新查购买记录
+                if (!pro) {
+                    Item(
+                        Icons.Outlined.Redeem,
+                        tr(R.string.about_redeem),
+                        tr(R.string.pro_redeem_summary),
+                    ) {
+                        openPlayRedeem(context)
+                    }
+                }
                 Item(
                     Icons.Outlined.Restore,
                     stringResource(R.string.pro_restore),
@@ -286,26 +351,51 @@ fun SettingsScreen(
     }
 
     if (confirmFree) {
-        AlertDialog(
-            onDismissRequest = { confirmFree = false },
-            title = { Text(tr(R.string.free_space_title, gb(freeable.sumOf { it.sizeBytes }))) },
-            text = {
-                Text(
-                    tr(R.string.free_space_body1, freeable.size) +
-                        tr(R.string.free_space_body2),
-                )
+        app.zyll.feature.gallery.ui.FreeUpFlow(
+            items = freeable,
+            title = tr(R.string.free_space_title, gb(freeable.sumOf { it.sizeBytes })),
+            body = tr(R.string.free_space_body1, freeable.size) + tr(R.string.free_space_body2),
+            confirmLabel = tr(R.string.free_space_confirm),
+            verify = { list, progress, checked ->
+                val r = cloud.verifyForFree(list, progress, checked)
+                app.zyll.feature.gallery.ui.FreeCheckResult(r.safe, r.missing, r.unverified)
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmFree = false
-                    when (val r = media.delete(freeable)) {
-                        is WriteResult.NeedsConfirmation -> deleteLauncher.launch(IntentSenderRequest.Builder(r.intent).build())
-                        is WriteResult.Failed -> Toast.makeText(context, r.message, Toast.LENGTH_SHORT).show()
-                        WriteResult.Done -> Toast.makeText(context, tr(R.string.free_space_done), Toast.LENGTH_SHORT).show()
+            recheck = { list -> cloud.safelyBackedUp(list) },
+            // Android 11 起先进系统回收站（30 天内能找回）；更早的系统没有回收站，是直接删除
+            onDelete = { safe ->
+                when (val r = media.trash(safe)) {
+                    is WriteResult.NeedsConfirmation -> {
+                        pendingTrash = safe
+                        deleteQueue = r.rest
+                        deleteBatchesOk = 0
+                        if (r.rest.isNotEmpty()) Toast.makeText(context, tr(app.zyll.feature.gallery.R.string.confirm_in_batches, r.rest.size + 1), Toast.LENGTH_SHORT).show()
+                        deleteLauncher.launch(IntentSenderRequest.Builder(r.intent).build())
                     }
-                }) { Text(tr(R.string.free_space_confirm)) }
+                    is WriteResult.Failed -> Toast.makeText(context, r.message, Toast.LENGTH_SHORT).show()
+                    WriteResult.Done -> afterFreed(safe, trashed = true)
+                }
             },
-            dismissButton = { TextButton(onClick = { confirmFree = false }) { Text(tr(R.string.common_cancel)) } },
+            onDismiss = { confirmFree = false },
+        )
+    }
+
+    freeTrashed?.let { items ->
+        app.zyll.feature.gallery.ui.FreeTrashedDialog(
+            count = items.size,
+            size = gb(items.sumOf { it.sizeBytes }),
+            onEmpty = {
+                when (val r = media.delete(items)) {
+                    is WriteResult.NeedsConfirmation -> {
+                        deleteQueue = r.rest
+                        deleteBatchesOk = 0
+                        if (r.rest.isNotEmpty()) Toast.makeText(context, tr(app.zyll.feature.gallery.R.string.confirm_in_batches, r.rest.size + 1), Toast.LENGTH_SHORT).show()
+                        deleteLauncher.launch(IntentSenderRequest.Builder(r.intent).build())
+                    }
+                    is WriteResult.Failed -> Toast.makeText(context, r.message, Toast.LENGTH_SHORT).show()
+                    WriteResult.Done -> Toast.makeText(context, tr(R.string.free_space_done), Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = { freeTrashed = null },
         )
     }
 
@@ -379,11 +469,16 @@ fun SettingsScreen(
         )
     }
 
+    if (downloadModel) {
+        app.zyll.feature.gallery.ui.ModelDownloadDialog(ai, onImport = { importModel.launch(arrayOf("*/*")) }, onDismiss = { downloadModel = false })
+    }
+
     if (confirmRemove) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
             title = { Text(tr(R.string.ai_model_remove_title)) },
-            text = { Text(tr(R.string.ai_model_remove_body)) },
+            // 敏感画面保护靠这个模型：删了就不再识别新照片，已经认出来的也不再打码
+            text = { Text(tr(R.string.ai_model_remove_body) + if (sensitiveOn) tr(R.string.ai_model_remove_sensitive) else "") },
             confirmButton = { TextButton(onClick = { confirmRemove = false; ai.remove() }) { Text(tr(R.string.common_delete)) } },
             dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text(tr(R.string.common_cancel)) } },
         )
@@ -453,7 +548,7 @@ private fun Item(
     }
 }
 
-private tailrec fun android.content.Context.findActivity(): Activity? = when (this) {
+internal tailrec fun android.content.Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is android.content.ContextWrapper -> baseContext.findActivity()
     else -> null

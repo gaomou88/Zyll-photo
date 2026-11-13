@@ -102,8 +102,11 @@ class ZylcEncryptingInputStream internal constructor(
     }
 }
 
-/** 流式解密：逐块读、逐块校验、逐块写出。返回明文字节数。 */
-fun Zylc.decryptStream(input: InputStream, kWrap: ByteArray, out: OutputStream): Long {
+/**
+ * 流式解密：逐块读、逐块校验、逐块写出。返回明文字节数。
+ * [expect] 不为空时要求文件类型一致（比如原图位置不能被换成一张缩略图的密文）。
+ */
+fun Zylc.decryptStream(input: InputStream, kWrap: ByteArray, out: OutputStream, expect: BlobKind? = null): Long {
     fun readFully(n: Int): ByteArray {
         val b = ByteArray(n)
         var got = 0
@@ -116,6 +119,7 @@ fun Zylc.decryptStream(input: InputStream, kWrap: ByteArray, out: OutputStream):
     }
     val reader = Zylc.Reader.open(readFully(HEADER_LEN), kWrap)
     val h = reader.header
+    if (expect != null && h.kind != expect) throw ZyllCryptoException("unexpected blob kind ${h.kind}")
     var written = 0L
     for (i in 0 until h.chunkCount) {
         val plain = reader.decryptChunk(i, readFully(h.chunkCipherLen(i)))

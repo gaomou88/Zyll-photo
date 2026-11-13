@@ -31,7 +31,11 @@ import app.zyll.core.media.R
 /** 需要用户在系统弹窗里确认的修改（Android 11+ 修改别的应用拍的照片时都要确认）。 */
 sealed interface WriteResult {
     data object Done : WriteResult
-    data class NeedsConfirmation(val intent: PendingIntent) : WriteResult
+    /**
+     * 要用户确认。照片很多时分成几批，每批一个系统确认框：先弹 [intent]，确认后再依次弹 [rest]。
+     * 一批太大（几千个）会超过系统跨进程传输的上限而崩溃。
+     */
+    data class NeedsConfirmation(val intent: PendingIntent, val rest: List<PendingIntent> = emptyList()) : WriteResult
     data class Failed(val message: String) : WriteResult
 }
 
@@ -184,20 +188,31 @@ class MediaRepository(context: Context) {
 
     // ---------- 修改：收藏、回收站、删除 ----------
 
+    /** 按 [REQUEST_BATCH] 个一批生成系统确认请求。系统接口出错时返回 Failed，不让 App 崩溃。 */
+    private fun batched(items: List<MediaItem>, request: (List<Uri>) -> PendingIntent): WriteResult {
+        if (items.isEmpty()) return WriteResult.Done
+        return try {
+            val intents = items.chunked(REQUEST_BATCH).map { batch -> request(batch.map { it.uri }) }
+            WriteResult.NeedsConfirmation(intents.first(), intents.drop(1))
+        } catch (e: Exception) {
+            WriteResult.Failed(e.message ?: tr(R.string.no_delete_permission))
+        }
+    }
+
     fun favorite(items: List<MediaItem>, favorite: Boolean): WriteResult {
         if (!supportsFavoritesAndTrash) return WriteResult.Failed(tr(R.string.needs_android_11))
-        return WriteResult.NeedsConfirmation(MediaStore.createFavoriteRequest(resolver, items.map { it.uri }, favorite))
+        return batched(items) { MediaStore.createFavoriteRequest(resolver, it, favorite) }
     }
 
     fun trash(items: List<MediaItem>, trash: Boolean = true): WriteResult {
         if (!supportsFavoritesAndTrash) return delete(items)
-        return WriteResult.NeedsConfirmation(MediaStore.createTrashRequest(resolver, items.map { it.uri }, trash))
+        return batched(items) { MediaStore.createTrashRequest(resolver, it, trash) }
     }
 
     /** 永久删除。Android 10 及以下直接删（会先在界面上二次确认）。 */
     fun delete(items: List<MediaItem>): WriteResult {
         if (Build.VERSION.SDK_INT >= 30) {
-            return WriteResult.NeedsConfirmation(MediaStore.createDeleteRequest(resolver, items.map { it.uri }))
+            return batched(items) { MediaStore.createDeleteRequest(resolver, it) }
         }
         for (item in items) {
             try {
@@ -214,7 +229,7 @@ class MediaRepository(context: Context) {
 
     /** 要改文件本身（移动相簿、改位置信息）之前先拿写权限；开了“媒体管理”时系统不会弹窗。 */
     fun requestWrite(items: List<MediaItem>): WriteResult =
-        if (Build.VERSION.SDK_INT >= 30) WriteResult.NeedsConfirmation(MediaStore.createWriteRequest(resolver, items.map { it.uri }))
+        if (Build.VERSION.SDK_INT >= 30) batched(items) { MediaStore.createWriteRequest(resolver, it) }
         else WriteResult.Done
 
     /** 把照片移到另一个相簿（文件夹），比如 "Pictures/旅行/"。返回成功的数量。 */
@@ -245,7 +260,7 @@ class MediaRepository(context: Context) {
                     } else {
                         GPS_TAGS.forEach { exif.setAttribute(it, null) }
                     }
-                    exif.saveAttributes()
+                    saveExif(exif, pfd)
                     ok++
                 }
             } catch (_: Exception) {
@@ -278,7 +293,7 @@ class MediaRepository(context: Context) {
                     resolver.openFileDescriptor(item.uri, "rw")?.use { pfd ->
                         val exif = ExifInterface(pfd.fileDescriptor)
                         writeExifTime(exif, takenAt)
-                        exif.saveAttributes()
+                        saveExif(exif, pfd)
                         changed = true
                     }
                 } catch (_: Exception) {
@@ -377,6 +392,40 @@ class MediaRepository(context: Context) {
     private fun Cursor.stringOr(i: Int) = if (i >= 0 && !isNull(i)) getString(i) else ""
 
     private companion object {
+        /** 一个系统确认框最多带多少个 URI。几千个会超过跨进程传输的上限（约 1MB）而崩溃。 */
+        const val REQUEST_BATCH = MEDIA_REQUEST_BATCH
+
+        /**
+         * 写回 EXIF。ExifInterface 通过文件描述符保存时从头覆盖写、不截断：EXIF 变短（比如删掉位置）时，
+         * 文件末尾会留下旧内容。动态照片的视频是按“从文件末尾往前数”找的，尾巴上多出几个字节视频就对不上了，
+         * 所以写完按实际写到的位置截断。
+         */
+        fun saveExif(exif: ExifInterface, pfd: android.os.ParcelFileDescriptor) {
+            val fd = pfd.fileDescriptor
+            val before = pfd.statSize
+            exif.saveAttributes()
+            val end = android.system.Os.lseek(fd, 0, android.system.OsConstants.SEEK_CUR)
+            // 只改了 EXIF，新旧大小差不了多少；对不上就不动（宁可留尾巴也不截错）
+            if (before <= 0 || end <= 0 || end >= before || before - end >= 1 shl 20) return
+            // 再核对一次：EXIF 短了 k 字节时，新内容的最后 k 字节和残留的尾巴都是原文件的最后 k 字节，必须一模一样。
+            // 防止以后 ExifInterface 改了写法（比如写完回头改文件头），位置停在中间时把视频截掉
+            val k = (before - end).toInt()
+            if (end - k < 0) return
+            val ch = java.io.FileInputStream(fd).channel
+            fun read(at: Long): ByteArray {
+                val buf = java.nio.ByteBuffer.allocate(k)
+                var pos = at
+                while (buf.hasRemaining()) {
+                    val n = ch.read(buf, pos)
+                    if (n <= 0) break
+                    pos += n
+                }
+                return buf.array().copyOf(buf.position())
+            }
+            val tail = read(end)
+            if (tail.size == k && tail.contentEquals(read(end - k))) android.system.Os.ftruncate(fd, end)
+        }
+
         /** 把时间写进 EXIF 的三个时间字段。 */
         fun writeExifTime(exif: ExifInterface, takenAt: Long) {
             val fmt = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
@@ -399,3 +448,6 @@ class MediaRepository(context: Context) {
         const val COL_BUCKET_NAME = "bucket_display_name"
     }
 }
+
+/** 一个系统确认框最多带多少张（见 [WriteResult.NeedsConfirmation]）：界面据此算“已处理多少张”。 */
+const val MEDIA_REQUEST_BATCH = 1500

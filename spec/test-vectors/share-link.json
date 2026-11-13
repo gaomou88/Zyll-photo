@@ -1,0 +1,12 @@
+{
+    "description": "外链分享向量，见 spec/share-link.md。密码含非 ASCII 字符，先做 NFC 再取 UTF-8",
+    "secret": "bd4b199ea4a7e555623a34afd1ec2779c6e88ff18677565ecf4000c7a7f8363f",
+    "password": "Seá 2024 海边",
+    "salt": "aefe470874af8c7e8261eacbb1f82729",
+    "linkKey": "236ad607bf70b851b319165176d54af22f0727c313695a5f8614a82246dd5a7d",
+    "fragmentGoogle": "1.g.1AbC-dEf_GhIjK.vUsZnqSn5VViOjSv0ewnecboj_GGd1Zez0AAx6f4Nj8",
+    "oneDriveUrl": "https://1drv.ms/u/s!AbCdEfGh?e=xyz",
+    "fragmentOneDrive": "1.o.aHR0cHM6Ly8xZHJ2Lm1zL3UvcyFBYkNkRWZHaD9lPXh5eg.vUsZnqSn5VViOjSv0ewnecboj_GGd1Zez0AAx6f4Nj8",
+    "manifestPlain": "eyJmb3JtYXQiOiJ6eWxsLWxpbmsiLCJ2ZXJzaW9uIjoxLCJpZCI6IjAwMTEyMjMzNDQ1NTY2Nzc4ODk5YWFiYmNjZGRlZWZmIiwidGl0bGUiOiJ0IiwiY3JlYXRlZCI6MSwiZXhwaXJlcyI6bnVsbCwib3JpZ2luYWxzIjp0cnVlLCJpdGVtcyI6W119",
+    "manifestSealed": "5a594c4301010c056766ed57a8926582d1809be494e2613d35a217a9efa3f2b2b5faeb07cfcc088fae96e931437ee31b71b119f2081a977862e86ce6e4116ca579e70069d27cb82312388465d91f45af11c64a65000000000000008ddccc26b415661fc31b2545d157187cd06e3200150fe1fbb9eb242c38ae40c54acb5c061331bc27cbda5724301e777b5a4eb90cb062daec26b9524f9e5b1d84573d94eb5f034915b375879f912dc434128869dc51aa8ad87dab831dbcf3fa0b4115293f8589dd4802f027b4b3d2d2c9e98408e6fdf9bcd229bc67e24ef085c9e167bb56d956a9949ba26d67011cddf7305f8f08a4e2218f2090f0e67d0f"
+}

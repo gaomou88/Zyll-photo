@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="consent_title">Zyll へようこそ</string>
+    <string name="consent_body">ご利用の前に「利用規約」と「プライバシーポリシー」をお読みください。Zyll はこのスマホ上で写真を表示・検索します。クラウドバックアップをオンにしない限り何もアップロードされず、オンにしてもご自身の Google Drive または OneDrive にのみ保存されます。\n\n「同意する」をタップすると、両方に同意したものとみなされます。</string>
+    <string name="consent_agree">同意する</string>
+    <string name="consent_decline">同意しないで終了</string>
+</resources>

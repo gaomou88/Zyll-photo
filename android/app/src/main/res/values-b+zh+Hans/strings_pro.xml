@@ -16,4 +16,5 @@
     <string name="cloud_media_title">接入云端媒体</string>
     <string name="cloud_media_setting_active">已接入 · 其他应用选图时可以直接选 Zyll 网盘里的照片</string>
     <string name="cloud_media_setting_off">让其他应用选图时也能看到 Zyll 网盘里的照片</string>
+    <string name="cloud_media_setting_locked">已选用 · 解锁 Pro 后，选图时会显示网盘照片</string>
 </resources>

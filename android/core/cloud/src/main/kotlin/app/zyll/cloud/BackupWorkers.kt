@@ -22,18 +22,29 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     override suspend fun doWork(): Result {
         val cloud = CloudBackup.get(applicationContext)
         val manual = inputData.getBoolean(KEY_MANUAL, false)
+        val picked = inputData.getBoolean(KEY_PICKED, false)
         // 省电模式下自动备份先不跑，等下次定时或有新照片时再说；手动点的照常
         if (!manual && cloud.isPowerSave()) return Result.success()
-        var ok: Boolean
+        var ok = false
         var uploaded = 0
         var first = true
-        do {
-            ok = cloud.runBackup({ isStopped }, manual && first) { s -> notify(s) }
-            first = false
-            uploaded += cloud.status.value.lastRunUploaded
-        } while (ok && !isStopped && cloud.consumeRerun())
-        // 这次传了照片就马上把备份目录也传上去：旧手机突然丢了，新手机也能看到刚备份的照片
-        if (uploaded > 0) cloud.uploadIndexNow()
+        try {
+            do {
+                ok = cloud.runBackup({ isStopped }, manual && first, picked) { s -> notify(s) }
+                first = false
+                uploaded += cloud.status.value.lastRunUploaded
+                // 设置改了、或者条件没了：不在这个任务里接着跑（它的网络、充电条件是旧的），结束后按现在的设置重新排
+            } while (ok && !isStopped && !cloud.pendingRequeue() && cloud.consumeRerun())
+            // 这次传了照片就马上把备份目录也传上去：旧手机突然丢了，新手机也能看到刚备份的照片
+            if (uploaded > 0) cloud.uploadIndexNow()
+            cloud.requeueIfNeeded()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // 没料到的错误不让整个任务崩掉（崩了 WorkManager 会把它当失败，不再重试）：稍后再试
+            android.util.Log.w("ZyllBackup", "backup failed", e)
+            return Result.retry()
+        }
         if (ok && uploaded > 0) notifyFinished(applicationContext, uploaded, cloud.status.value.backedUp)
         return if (ok) Result.success() else Result.retry()
     }
@@ -58,6 +69,61 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 
     companion object {
         const val KEY_MANUAL = "manual"
+        /** 用户手动选了几张照片要备份（[CloudBackup.backupItems]）：只有那几张不看仅 Wi‑Fi / 仅充电。 */
+        const val KEY_PICKED = "picked"
+    }
+}
+
+/**
+ * 改了密码或换了恢复密钥以后，有账号当时没传上新的密钥包：联网后补传，失败了隔一段再试。
+ * 和自动备份开没开无关：网盘里留着旧的密钥包时，旧密码和旧恢复密钥在那里仍然能用。
+ */
+class KeySyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result = try {
+        // 一直做不成（比如某个账号的目录解不开）时不要在任意网络下无限重试：试几次就交给下一轮备份
+        if (CloudBackup.get(applicationContext).syncKeyBundle() || runAttemptCount >= MAX_ATTEMPTS) Result.success() else Result.retry()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        android.util.Log.w("ZyllBackup", "keybundle sync failed", e)
+        if (runAttemptCount >= MAX_ATTEMPTS) Result.success() else Result.retry()
+    }
+
+    private companion object {
+        const val MAX_ATTEMPTS = 6
+    }
+}
+
+/** 外链到期时撤销；撤销到一半的接着撤（spec/share-link.md 第 4 节）。 */
+class ShareLinkWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result = try {
+        // sweep 会按剩下的链接重新排下一次
+        CloudBackup.get(applicationContext).shareLinks.sweep()
+        Result.success()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        android.util.Log.w("ZyllLinks", "share link sweep failed", e)
+        Result.retry()
+    }
+
+    companion object {
+        private const val NAME = "zyll-share-links"
+
+        /** 排到 [at]（毫秒时间戳）联网后运行；null = 没有要到期的，取消。 */
+        fun schedule(context: Context, at: Long?) {
+            val wm = androidx.work.WorkManager.getInstance(context)
+            if (at == null) {
+                wm.cancelUniqueWork(NAME)
+                return
+            }
+            val delay = (at - System.currentTimeMillis()).coerceAtLeast(0)
+            val request = androidx.work.OneTimeWorkRequestBuilder<ShareLinkWorker>()
+                .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).build())
+                .setInitialDelay(delay, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .build()
+            wm.enqueueUniqueWork(NAME, ExistingWorkPolicy.REPLACE, request)
+        }
     }
 }
 

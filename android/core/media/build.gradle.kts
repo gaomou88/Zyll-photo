@@ -20,6 +20,8 @@ kotlin {
 }
 
 dependencies {
+    // 动态照片的识别规则（纯 JVM，和网页版共用测试向量）
+    api(project(":core:motion"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.exifinterface)

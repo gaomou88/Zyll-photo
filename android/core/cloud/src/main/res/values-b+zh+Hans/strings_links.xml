@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="link_err_nothing">请至少选一张照片。</string>
+    <string name="link_err_encryption">外链只能分享端到端加密的备份。请先开启加密（并在这台手机上解锁）。</string>
+    <string name="link_err_storage">请先为 Google 账号开启分享功能。隐藏区里的备份不能用外链分享。</string>
+    <string name="link_err_not_backed_up">这些照片还没有加密备份到网盘。先备份，再创建链接。</string>
+    <string name="link_err_password">密码至少要 %1$d 个字符。</string>
+    <string name="link_err_expiry">有效期已经过了。</string>
+    <string name="link_err_too_many">一条链接最多放 %1$d 张照片。</string>
+    <string name="link_err_network">连不上网盘，什么都没有分享出去。请再试一次。</string>
+    <string name="link_err_wiping">正在删除备份数据，现在不能创建链接。</string>
+    <string name="link_err_not_allowed">这个账号不允许创建公开链接（公司或学校账号常被管理员关掉）。</string>
+</resources>

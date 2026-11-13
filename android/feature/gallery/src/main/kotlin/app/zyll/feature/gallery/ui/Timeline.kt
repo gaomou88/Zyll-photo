@@ -1,5 +1,9 @@
 package app.zyll.feature.gallery.ui
 
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.getValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -62,7 +66,10 @@ fun TimelineScreen(
         EmptyState(tr(R.string.timeline_empty), tr(R.string.timeline_empty_hint), Modifier.padding(contentPadding))
         return
     }
-    val memories = remember(state.items) { onThisDay(state.items) }
+    val items = state.items
+    val memories by produceState(Memories.peek(items).orEmpty(), items) {
+        value = Memories.peek(items) ?: withContext(Dispatchers.Default) { Memories.compute(items) }
+    }
     val header: (LazyGridScope.() -> Unit)? = if (memories.isEmpty()) null else ({
         item(key = "memories", span = { GridItemSpan(maxLineSpan) }, contentType = "memories") {
             MemoriesRow(memories, onOpenMemory)

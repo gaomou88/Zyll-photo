@@ -42,6 +42,22 @@ class CloudAuth(context: Context) {
     /** 登录过，但权限范围变了（比如改成了隐藏的应用数据区），需要重新连接一次。 */
     fun needsReconnect(p: CloudProvider): Boolean = load(p)?.let { it.isAuthorized && !hasScopes(p, it) } == true
 
+    /**
+     * [exchange] 换来、还没保存的授权里有没有主权限。服务没回传 scope 时当作有（和 [hasScopes] 一样）。
+     * Google 授权页可以单独取消某一项：取消了主权限的令牌不能存，否则好好的账号会变成“需要重新连接”。
+     */
+    fun pendingHasMainScope(p: CloudProvider, s: AuthState): Boolean = hasScopes(p, s)
+
+    /** [exchange] 换来的授权里有没有某个额外权限（比如 drive.file）。没回传 scope 时当作没有。 */
+    fun pendingHasScope(s: AuthState, scope: String): Boolean =
+        s.scope?.split(' ')?.any { it.equals(scope, ignoreCase = true) } == true
+
+    /** 是否授权了某个额外的权限（比如分享功能要的 drive.file）。服务没回传 scope 时当作没有，保险起见让用户重新连接一次。 */
+    fun hasScope(p: CloudProvider, scope: String): Boolean {
+        val granted = load(p)?.takeIf { it.isAuthorized }?.scope?.split(' ') ?: return false
+        return granted.any { it.equals(scope, ignoreCase = true) }
+    }
+
     private fun hasScopes(p: CloudProvider, s: AuthState): Boolean {
         val granted = s.scope?.split(' ')?.toSet() ?: return true // 有的服务不回传 scope，当作满足
         // offline_access、openid 之类的不一定回传，只检查真正存文件的那个
@@ -50,19 +66,24 @@ class CloudAuth(context: Context) {
     }
 
     /** 打开登录页的 Intent，用 startActivityForResult 启动，结果交给 [complete]。 */
-    fun signInIntent(p: CloudProvider): Intent {
+    fun signInIntent(p: CloudProvider, extraScopes: List<String> = emptyList(), loginHint: String? = null): Intent {
         val c = CloudConfig.of(p)
         check(c.configured) { tr(R.string.cloud_not_supported, p.label) }
         val config = AuthorizationServiceConfiguration(Uri.parse(c.authEndpoint), Uri.parse(c.tokenEndpoint))
         val request = AuthorizationRequest.Builder(config, c.clientId, ResponseTypeValues.CODE, Uri.parse(c.redirectUri))
-            .setScopes(c.scopes)
+            .setScopes((c.scopes + extraScopes).distinct())
             .setPrompt(if (p.kind == DriveKind.GoogleDrive) "consent select_account" else "select_account")
+            // 再授权、重新连接时把原来的账号告诉登录页，预先选中它，少选错
+            .apply { if (!loginHint.isNullOrBlank()) setLoginHint(loginHint) }
             .build()
         return service.getAuthorizationRequestIntent(request)
     }
 
-    /** 处理登录页返回的结果，换取令牌。 */
-    suspend fun complete(p: CloudProvider, data: Intent?) {
+    /**
+     * 处理登录页返回的结果，换取令牌，但先不保存：调用方用 [AuthState.getAccessToken] 确认登的是哪个账号，
+     * 对了再 [commit]。这样核对期间别的任务拿到的还是原来那个账号的令牌。
+     */
+    suspend fun exchange(p: CloudProvider, data: Intent?): AuthState {
         if (data == null) throw IOException(tr(R.string.auth_cancelled))
         val response = AuthorizationResponse.fromIntent(data)
         val error = AuthorizationException.fromIntent(data)
@@ -74,8 +95,11 @@ class CloudAuth(context: Context) {
                 if (token != null) cont.resume(Unit) else cont.resumeWithException(IOException(ex?.errorDescription ?: tr(R.string.auth_token_failed)))
             }
         }
-        save(p, state)
+        return state
     }
+
+    /** 保存 [exchange] 换来、核对过的登录状态。 */
+    fun commit(p: CloudProvider, state: AuthState) = save(p, state)
 
     /** 拿一个有效的访问令牌，过期了会自动刷新。 */
     suspend fun accessToken(p: CloudProvider): String = locks.getOrPut(p) { Mutex() }.withLock {
@@ -112,10 +136,63 @@ class CloudAuth(context: Context) {
     }
 
     private fun load(p: CloudProvider): AuthState? = cache[p]
-        ?: prefs.getString(p.name, null)?.let { runCatching { AuthState.jsonDeserialize(it) }.getOrNull() }?.also { cache[p] = it }
+        ?: prefs.getString(p.name, null)?.let { stored ->
+            val json = TokenSeal.open(stored) ?: return@let null
+            runCatching { AuthState.jsonDeserialize(json) }.getOrNull()?.also { st ->
+                // 旧版本明文存的：读到后马上换成加密存
+                if (!TokenSeal.isSealed(stored)) prefs.edit().putString(p.name, TokenSeal.seal(json)).apply()
+            }
+        }?.also { cache[p] = it }
 
     private fun save(p: CloudProvider, state: AuthState) {
         cache[p] = state
-        prefs.edit().putString(p.name, state.jsonSerializeString()).apply()
+        prefs.edit().putString(p.name, TokenSeal.seal(state.jsonSerializeString())).apply()
+    }
+}
+
+/**
+ * 登录状态（含刷新令牌）用 Android Keystore 里不可导出的硬件密钥加密后再存，root 后翻配置文件也拿不到明文令牌。
+ * 硬件密钥失效时解不开，等于没登录（界面上要重新连接），不影响备份记录。
+ */
+internal object TokenSeal {
+    private const val ALIAS = "zyll-cloud-auth"
+    private const val PREFIX = "k1:"
+
+    fun isSealed(stored: String) = stored.startsWith(PREFIX)
+
+    fun seal(json: String): String = runCatching {
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key())
+        val out = cipher.iv + cipher.doFinal(json.toByteArray(Charsets.UTF_8))
+        PREFIX + android.util.Base64.encodeToString(out, android.util.Base64.NO_WRAP)
+    }.getOrElse { json } // 极少数机型 Keystore 用不了：退回原来的明文存法，不让登录失败
+
+    /** 解开存着的状态；旧版本的明文原样返回；解不开返回 null。 */
+    fun open(stored: String): String? {
+        if (!isSealed(stored)) return stored
+        return runCatching {
+            val raw = android.util.Base64.decode(stored.removePrefix(PREFIX), android.util.Base64.NO_WRAP)
+            val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key(), javax.crypto.spec.GCMParameterSpec(128, raw, 0, 12))
+            String(cipher.doFinal(raw, 12, raw.size - 12), Charsets.UTF_8)
+        }.getOrNull()
+    }
+
+    @Synchronized
+    private fun key(): javax.crypto.SecretKey {
+        val ks = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (ks.getKey(ALIAS, null) as? javax.crypto.SecretKey)?.let { return it }
+        val gen = javax.crypto.KeyGenerator.getInstance(android.security.keystore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        gen.init(
+            android.security.keystore.KeyGenParameterSpec.Builder(
+                ALIAS,
+                android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT,
+            )
+                .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build(),
+        )
+        return gen.generateKey()
     }
 }

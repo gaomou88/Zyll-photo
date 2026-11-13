@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
  * 敏感画面保护：AI 判定为敏感的照片先打码，用户确认后才显示。
  * 可以在“我的”里开关；也可以临时暂停 10 分钟。
  */
-class SensitiveFilter(context: Context, ai: AiSearch, private val scope: CoroutineScope) {
+class SensitiveFilter(context: Context, private val ai: AiSearch, private val scope: CoroutineScope) {
     private val prefs = context.applicationContext.getSharedPreferences("sensitive", Context.MODE_PRIVATE)
 
     private val _enabled = MutableStateFlow(prefs.getBoolean(KEY_ENABLED, false))
@@ -54,11 +54,55 @@ class SensitiveFilter(context: Context, ai: AiSearch, private val scope: Corouti
             if (scan && model == ModelState.Ready) cloud - indexed else emptySet()
         }
 
+    // 选择器这一侧更保守：只要开了“连网盘照片一起检查”，模型在检查、加载、下载中时也把没扫过的网盘照片当作可能敏感。
+    // 只有模型没装或加载失败（不会去扫）时才放开。选择器会缓存缩略图，宁可多打码也不要漏
+    private fun pickerPendingActive(scan: Boolean, model: ModelState): Boolean =
+        scan && model !is ModelState.NotInstalled && model !is ModelState.Failed
+
+    private val pickerPending: Flow<Set<Long>> =
+        combine(ai.scanCloud, ai.indexedIds, _cloudIds, ai.modelState) { scan, indexed, cloud, model ->
+            if (pickerPendingActive(scan, model)) cloud - indexed else emptySet()
+        }
+
     /** 当前需要打码的照片。 */
     val hidden: StateFlow<Set<Long>> =
         combine(_enabled, _pausedUntil, ai.sensitiveIds, _revealed, cloudPending) { on, paused, ids, revealed, pending ->
             if (!on || paused > 0L) emptySet() else (ids + pending) - revealed
         }.stateIn(scope, SharingStarted.Eagerly, emptySet())
+
+    private val _pickerBlur = MutableStateFlow(prefs.getBoolean(KEY_PICKER_BLUR, false))
+    /** 在系统照片选择器里也打码（Play 版、Android 15+ 接入云端媒体后才有用）。 */
+    val pickerBlur: StateFlow<Boolean> = _pickerBlur.asStateFlow()
+
+    fun setPickerBlur(on: Boolean) {
+        prefs.edit().putBoolean(KEY_PICKER_BLUR, on).apply()
+        _pickerBlur.value = on
+    }
+
+    /**
+     * 系统照片选择器里要打码的照片：和相册里同一套判定，但不管“仍要查看”的临时放行（那是相册里点的）。
+     * 总开关、选择器开关都开着、没在暂停时才有。
+     */
+    val pickerHidden: StateFlow<Set<Long>> =
+        combine(_enabled, _pickerBlur, _pausedUntil, ai.sensitiveIds, pickerPending) { on, picker, paused, ids, pending ->
+            if (!on || !picker || paused > 0L) emptySet() else ids + pending
+        }.stateIn(scope, SharingStarted.Eagerly, emptySet())
+
+    /**
+     * 选择器接口直接调用：这张网盘照片要不要打码。[ids] 是它在相册里可能用的 id，[cloudOnly] 表示本机已经没有这张。
+     * 不读 [pickerHidden]：选择器常在 Zyll 进程刚被拉起时来要缩略图，那时 stateIn 还是初值空集合，
+     * 原图缩略图会被交出去并被系统缓存。这里直接读各个来源的当前值（敏感名单是同步从磁盘读的）。
+     */
+    fun pickerBlurNow(ids: List<Long>, cloudOnly: Boolean): Boolean {
+        if (!_enabled.value || !_pickerBlur.value || _pausedUntil.value > 0L) return false
+        val sensitive = ai.sensitiveIds.value
+        if (ids.any { it in sensitive }) return true
+        // “还没扫过先打码”只管只在网盘里的照片，和 [pickerHidden] 一致；本机还在的只看敏感名单，
+        // 否则冷启动时它们全被打码、缓存，之后又不会进名单触发刷新，会一直是磨砂的
+        if (!cloudOnly || !pickerPendingActive(ai.scanCloud.value, ai.modelState.value)) return false
+        val indexed = ai.indexedIds.value
+        return ids.none { it in indexed }
+    }
 
     fun setEnabled(on: Boolean) {
         prefs.edit().putBoolean(KEY_ENABLED, on).apply()
@@ -92,5 +136,6 @@ class SensitiveFilter(context: Context, ai: AiSearch, private val scope: Corouti
 
     private companion object {
         const val KEY_ENABLED = "enabled"
+        const val KEY_PICKER_BLUR = "pickerBlur"
     }
 }

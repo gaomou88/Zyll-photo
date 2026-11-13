@@ -38,11 +38,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
@@ -51,6 +52,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDone
@@ -85,6 +87,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -98,6 +102,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.zyll.ai.ModelState
 import app.zyll.feature.gallery.ui.AlbumsScreen
+import app.zyll.feature.gallery.ui.topBarInsets
+import app.zyll.feature.gallery.ui.MEDIA_MS
 import app.zyll.feature.gallery.ui.DeviceAlbumsScreen
 import app.zyll.feature.gallery.ui.cloudAlbumItems
 import app.zyll.feature.gallery.ui.Density
@@ -116,6 +122,7 @@ import app.zyll.feature.gallery.ui.ViewerScreen
 import app.zyll.feature.gallery.ui.localDate
 import app.zyll.media.MediaItem
 import app.zyll.media.WriteResult
+import app.zyll.feature.gallery.ui.GridPositions
 import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.heightIn
@@ -162,13 +169,28 @@ class GalleryHooks(
     val onOpenBackup: () -> Unit = {},
     /** 外部要求切到“我的”页（比如从系统照片选择器点进来）。 */
     val openMe: kotlinx.coroutines.flow.Flow<Unit>? = null,
+    /** 外部要求打开“只在网盘里”的照片（比如删除全部备份数据前先看看哪些会彻底没了）。 */
+    val openCloudOnly: kotlinx.coroutines.flow.Flow<Unit>? = null,
     /** 别的 App 用“打开方式”交给 Zyll 的图片 / 视频。 */
     val openUri: kotlinx.coroutines.flow.Flow<Uri>? = null,
     /** 看完别的 App 交过来的文件后（回到那个 App）。 */
     val onExternalDone: () -> Unit = {},
     /** 端侧 AI；GitHub 版为 null（没有 AI 功能，不显示模型和智能分类）。 */
     val ai: AiAccess? = AiAccess.Open,
+    /** “我的”里打开了子页面（云端备份、共享相册等）：子页面有自己的“← 标题”，首页的“我的”大标题收起来。 */
+    val meSubpage: androidx.compose.runtime.State<Boolean>? = null,
+    /** 打开「我的 → 共享相册」（新建共享相册、管理分享链接）。 */
+    val onOpenShared: (() -> Unit)? = null,
 )
+
+/** 用流量手动备份前的确认：[thenLink] 不为空时备份完接着创建分享链接。 */
+private data class MeteredAsk(val items: List<MediaItem>, val bytes: Long, val thenLink: List<MediaItem>?)
+
+/** “先备份，再创建链接”：[ids] 是要等它备份完的照片。 */
+private data class BackupThenLink(val items: List<MediaItem>, val ids: Set<Long>)
+
+/** 分享面板里“能不能建链接”还在后台算（和 null = 可以 区分开）。 */
+private val SHARE_REASON_LOADING = String(charArrayOf('…'))
 
 /** 端侧 AI 能不能用。Play 免费版 [locked] 为 true，显示解锁入口。 */
 class AiAccess(
@@ -206,8 +228,94 @@ sealed interface Source {
 
 private sealed interface Route {
     data class Collection(val title: String, val source: Source) : Route
-    data class Viewer(val ids: List<Long>, val startId: Long, val inTrash: Boolean) : Route
+    /** [restored]：App 被系统回收后恢复出来的；照片列表可能还没加载好，先等一会儿再显示。 */
+    data class Viewer(val ids: List<Long>, val startId: Long, val inTrash: Boolean, val restored: Boolean = false) : Route {
+        /** 正在看的那张（翻页时更新）。只用来保存状态，不参与相等比较，免得翻页时整个页面被当成新页面重建。 */
+        @Volatile var currentId: Long = startId
+    }
     data object DeviceAlbums : Route
+}
+
+/**
+ * 页面栈存进系统保存的状态：App 在后台被系统回收、再回来时回到原来的页面（相册、大图），不是回到首页。
+ * 大图的照片列表很长时只存当前这张前后各 [VIEWER_SAVE_WINDOW] 张，免得保存的状态太大。回收站里的大图不恢复。
+ */
+private val RouteStackSaver = androidx.compose.runtime.saveable.Saver<androidx.compose.runtime.snapshots.SnapshotStateList<Route>, String>(
+    save = { stack -> encodeRoutes(stack) },
+    restore = { text -> mutableStateListOf<Route>().apply { addAll(decodeRoutes(text)) } },
+)
+
+private const val VIEWER_SAVE_WINDOW = 1000
+
+private fun encodeRoutes(routes: List<Route>): String {
+    val arr = org.json.JSONArray()
+    routes.forEach { r ->
+        val o = org.json.JSONObject()
+        when (r) {
+            Route.DeviceAlbums -> o.put("t", "albums")
+            is Route.Collection -> o.put("t", "collection").put("title", r.title).put("src", encodeSource(r.source) ?: return@forEach)
+            is Route.Viewer -> {
+                if (r.inTrash) return@forEach
+                // 存正在看的那张，恢复后回到它，而不是最开始点开的那张
+                val cur = r.currentId.takeIf { it in r.ids } ?: r.startId
+                val at = r.ids.indexOf(cur).coerceAtLeast(0)
+                val ids = r.ids.subList((at - VIEWER_SAVE_WINDOW).coerceAtLeast(0), (at + VIEWER_SAVE_WINDOW + 1).coerceAtMost(r.ids.size))
+                o.put("t", "viewer").put("start", cur).put("ids", org.json.JSONArray(ids))
+            }
+        }
+        arr.put(o)
+    }
+    return arr.toString()
+}
+
+private fun decodeRoutes(text: String): List<Route> = runCatching {
+    val arr = org.json.JSONArray(text)
+    (0 until arr.length()).mapNotNull { i ->
+        val o = arr.getJSONObject(i)
+        when (o.getString("t")) {
+            "albums" -> Route.DeviceAlbums
+            "collection" -> decodeSource(o.getJSONObject("src"))?.let { Route.Collection(o.getString("title"), it) }
+            "viewer" -> {
+                val ids = o.getJSONArray("ids").let { a -> List(a.length()) { a.getLong(it) } }
+                if (ids.isEmpty()) null else Route.Viewer(ids, o.getLong("start"), inTrash = false, restored = true)
+            }
+            else -> null
+        }
+    }
+}.getOrDefault(emptyList())
+
+private fun encodeSource(s: Source): org.json.JSONObject? = org.json.JSONObject().apply {
+    when (s) {
+        is Source.Album -> put("k", "album").put("v", s.bucketId)
+        Source.Favorites -> put("k", "favorites")
+        Source.Videos -> put("k", "videos")
+        Source.Screenshots -> put("k", "screenshots")
+        Source.Trash -> put("k", "trash")
+        Source.Archive -> put("k", "archive")
+        Source.CloudOnly -> put("k", "cloudOnly")
+        Source.Recent -> put("k", "recent")
+        is Source.CloudAlbum -> put("k", "cloudAlbum").put("v", s.name)
+        is Source.Category -> put("k", "category").put("v", s.key)
+        is Source.Search -> put("k", "search").put("v", s.query)
+        // 固定列表（比如“那年今日”）太长就不存，回到它下面那一层
+        is Source.Fixed -> if (s.ids.size > VIEWER_SAVE_WINDOW * 2) return null else put("k", "fixed").put("v", org.json.JSONArray(s.ids))
+    }
+}
+
+private fun decodeSource(o: org.json.JSONObject): Source? = when (o.getString("k")) {
+    "album" -> Source.Album(o.getLong("v"))
+    "favorites" -> Source.Favorites
+    "videos" -> Source.Videos
+    "screenshots" -> Source.Screenshots
+    "trash" -> Source.Trash
+    "archive" -> Source.Archive
+    "cloudOnly" -> Source.CloudOnly
+    "recent" -> Source.Recent
+    "cloudAlbum" -> Source.CloudAlbum(o.getString("v"))
+    "category" -> Source.Category(o.getString("v"))
+    "search" -> Source.Search(o.getString("v"))
+    "fixed" -> o.getJSONArray("v").let { a -> Source.Fixed(List(a.length()) { a.getLong(it) }) }
+    else -> null
 }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -250,6 +358,13 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
     }
 
     val library by controller.library.collectAsState()
+    val favOverride = remember { androidx.compose.runtime.mutableStateMapOf<Long, Boolean>() }
+    // 媒体库刷新过来、和乐观状态一致了就不再需要它
+    LaunchedEffect(library) {
+        if (favOverride.isEmpty()) return@LaunchedEffect
+        val byId = library.byId
+        favOverride.keys.toList().forEach { id -> val i = byId[id]; if (i == null || i.isFavorite == favOverride[id]) favOverride.remove(id) }
+    }
     val noIds = remember { MutableStateFlow(emptySet<Long>()) }
     val noFlag = remember { MutableStateFlow(false) }
     val noProgress = remember { MutableStateFlow(BackupProgress()) }
@@ -258,7 +373,8 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
     val backupActiveState = (hooks.backup?.active ?: noFlag).collectAsState()
     val aiLockedState = (hooks.ai?.locked ?: noFlag).collectAsState()
     val backupProgress by (hooks.backup?.progress ?: noProgress).collectAsState()
-    val flags = remember(hiddenState, backedState, backupActiveState) {
+    val motionState = controller.motionIds.collectAsState()
+    val flags = remember(hiddenState, backedState, backupActiveState, motionState) {
         MediaFlags(
             hidden = hiddenState,
             backedUp = backedState,
@@ -267,9 +383,11 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
             onPause = { controller.sensitive.pauseFor(10) },
             onDisable = { controller.sensitive.setEnabled(false) },
             onLeaveViewer = controller.sensitive::clearReveals,
+            motion = motionState,
+            livePair = { id -> controller.livePairs.value[id] },
         )
     }
-    val stack = remember { mutableStateListOf<Route>() }
+    val stack = rememberSaveable(saver = RouteStackSaver) { mutableStateListOf<Route>() }
     var tab by rememberSaveable { mutableStateOf(Tab.Timeline) }
     var selection by remember { mutableStateOf(emptySet<Long>()) }
     var timelineDensity by rememberSaveable { mutableStateOf(Density.Comfortable) }
@@ -280,33 +398,79 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
     var albumPicker by remember { mutableStateOf<List<MediaItem>?>(null) }
     var locationEditor by remember { mutableStateOf<List<MediaItem>?>(null) }
     var freeUp by remember { mutableStateOf<Pair<List<MediaItem>, Int>?>(null) }
+    // 释放空间时刚移进回收站的照片：空间要等回收站清空才腾出来，弹框说清楚
+    var freeTrashed by remember { mutableStateOf<List<MediaItem>?>(null) }
     var cloudDelete by remember { mutableStateOf<List<MediaItem>?>(null) }
+    /** 分享面板正在给这些照片用。 */
+    var shareSheet by remember { mutableStateOf<List<MediaItem>?>(null) }
+    /** 正在给这些照片创建分享链接。 */
+    var linkFor by remember { mutableStateOf<List<MediaItem>?>(null) }
+    /** 用流量手动备份超过 500 MB：等用户确认。 */
+    var meteredBackup by remember { mutableStateOf<MeteredAsk?>(null) }
+    /** 手动备份还没传完的照片：都传完时提示一声。 */
+    var backupWatch by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    /** 这一轮一共手动备份了几项（提示“这张已备份”还是“都备份好了”）。 */
+    var backupWatchTotal by remember { mutableStateOf(0) }
+    /** “先备份，再创建链接”：等这些照片备份完，接着打开创建链接。 */
+    var backupThenLink by remember { mutableStateOf<BackupThenLink?>(null) }
     var trashConfirm by remember { mutableStateOf<TrashAsk?>(null) }
     var infoEditor by remember { mutableStateOf<MediaItem?>(null) }
     var busy by remember { mutableStateOf<BusyTask?>(null) }
     val uiScope = rememberCoroutineScope()
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+    // 长操作结束时界面可能已经关了：用 App 的 context 提示
+    fun appToast(msg: String) = Toast.makeText(context.applicationContext, msg, Toast.LENGTH_SHORT).show()
 
     LaunchedEffect(trashVersion, library) { trashItems = controller.trash() }
     LaunchedEffect(hooks.openMe) {
         hooks.openMe?.collect { stack.clear(); selection = emptySet(); tab = Tab.Me }
     }
+    LaunchedEffect(hooks.openCloudOnly) {
+        hooks.openCloudOnly?.collect {
+            stack.clear()
+            selection = emptySet()
+            tab = Tab.Albums
+            stack += Route.Collection(QuickCollection.CloudOnly.title, Source.CloudOnly)
+        }
+    }
 
     // ---- 系统确认弹窗（收藏 / 回收站 / 删除）----
-    var afterWrite by remember { mutableStateOf<(() -> Unit)?>(null) }
+    // 参数是做完的张数：全部做完是 null，分批确认只确认了前几批时是那几批的张数
+    var afterWrite by remember { mutableStateOf<((Int?) -> Unit)?>(null) }
+    var afterWriteFailed by remember { mutableStateOf<(() -> Unit)?>(null) }
+    // 照片很多时分批确认：这一批确认后接着弹下一批
+    var writeQueue by remember { mutableStateOf<List<android.app.PendingIntent>>(emptyList()) }
+    // 分批确认时前面有几批确认过、后面取消了：已经做了一部分，提示做了多少张，照样走“做完了”（比如释放空间后问要不要清空回收站）
+    var writeBatchesOk by remember { mutableIntStateOf(0) }
     var offerManageAfter by remember { mutableStateOf(false) }
     var manageMediaOffer by remember { mutableStateOf<(() -> Unit)?>(null) }
+    lateinit var launchWrite: (android.app.PendingIntent) -> Unit
     val writeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
+        val next = writeQueue.firstOrNull()
+        if (res.resultCode == Activity.RESULT_OK && next != null) {
+            writeBatchesOk++
+            writeQueue = writeQueue.drop(1)
+            launchWrite(next)
+            return@rememberLauncherForActivityResult
+        }
+        val ok = res.resultCode == Activity.RESULT_OK || writeBatchesOk > 0
+        // 部分完成时做完的张数（分批按列表顺序切，做完的就是前面那几批）；全部做完是 null
+        val partlyDone = if (res.resultCode != Activity.RESULT_OK && writeBatchesOk > 0) writeBatchesOk * app.zyll.media.MEDIA_REQUEST_BATCH else null
+        partlyDone?.let { toast(tr(R.string.confirm_partly_done, it)) }
+        writeBatchesOk = 0
+        writeQueue = emptyList()
         controller.refresh()
         trashVersion++
-        if (res.resultCode == Activity.RESULT_OK) afterWrite?.invoke()
+        if (ok) afterWrite?.invoke(partlyDone) else afterWriteFailed?.invoke()
         afterWrite = null
+        afterWriteFailed = null
         // 这次操作做完了，再问要不要开“媒体管理”，不插在确认框中间
         if (offerManageAfter) {
             offerManageAfter = false
             manageMediaOffer = {}
         }
     }
+    launchWrite = { writeLauncher.launch(IntentSenderRequest.Builder(it).build()) }
     val prefs = remember { context.getSharedPreferences("gallery", Context.MODE_PRIVATE) }
     var pendingAfterSettings by remember { mutableStateOf<(() -> Unit)?>(null) }
     val manageMediaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -314,14 +478,19 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
         pendingAfterSettings?.invoke()
         pendingAfterSettings = null
     }
-    fun perform(result: WriteResult, onDone: () -> Unit = {}) {
+    fun perform(result: WriteResult, onFail: () -> Unit = {}, onDone: (partlyDone: Int?) -> Unit = {}) {
         when (result) {
             WriteResult.Done -> {
-                controller.refresh(); trashVersion++; onDone()
+                controller.refresh(); trashVersion++; onDone(null)
             }
             is WriteResult.NeedsConfirmation -> {
                 val launch = {
                     afterWrite = onDone
+                    afterWriteFailed = onFail
+                    writeQueue = result.rest
+                    writeBatchesOk = 0
+                    // 超过一批时先说一声，不然用户不知道确认完还有下一个框
+                    if (result.rest.isNotEmpty()) toast(tr(R.string.confirm_in_batches, result.rest.size + 1))
                     writeLauncher.launch(IntentSenderRequest.Builder(result.intent).build())
                 }
                 // 第一次需要系统确认时，等这次做完再问一次要不要开“媒体管理”，开了以后就不用每次确认
@@ -331,26 +500,32 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
                 }
                 launch()
             }
-            is WriteResult.Failed -> Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+            is WriteResult.Failed -> {
+                onFail()
+                Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+            }
         }
     }
     // ---- 多选和大图里的各种操作 ----
     fun moveToAlbum(items: List<MediaItem>, path: String, label: String) {
         if (Build.VERSION.SDK_INT < 29) return toast(tr(R.string.move_unsupported_os))
-        perform(repo.requestWrite(items)) {
-            uiScope.launch {
+        perform(repo.requestWrite(items)) { partly ->
+            // 分批授权只确认了前几批：只动拿到权限的那些
+            val items = partly?.let(items::take) ?: items
+            controller.launchLong {
                 val n = repo.moveTo(items, path)
-                toast(if (n == items.size) tr(R.string.move_done, label) else tr(R.string.move_partial, n, items.size - n))
+                appToast(if (n == items.size) tr(R.string.move_done, label) else tr(R.string.move_partial, n, items.size - n))
                 controller.refresh()
                 selection = emptySet()
             }
         }
     }
     fun setLocation(items: List<MediaItem>, latLng: Pair<Double, Double>?) {
-        perform(repo.requestWrite(items)) {
-            uiScope.launch {
+        perform(repo.requestWrite(items)) { partly ->
+            val items = partly?.let(items::take) ?: items
+            controller.launchLong {
                 val n = repo.setLocation(items, latLng)
-                toast(
+                appToast(
                     when {
                         n == 0 -> tr(R.string.location_unsupported)
                         latLng == null -> tr(R.string.location_removed, n)
@@ -362,10 +537,49 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
             }
         }
     }
-    fun backupSelected(items: List<MediaItem>) {
+    /** [thenLink] 不为空：备份完接着给这些照片创建分享链接。 */
+    fun startBackup(items: List<MediaItem>, thenLink: List<MediaItem>? = null) {
         val b = hooks.backup ?: return
-        if (b.backup(items)) toast(tr(R.string.backup_started_n, items.size)) else toast(tr(R.string.backup_connect_first))
         selection = emptySet()
+        // 已经备份过的不再说“正在备份”：全都备份过就直接说，有一部分备份过就说清楚各几项
+        val done = b.backedUpIds.value
+        val todo = items.filter { !it.isCloud && it.id !in done }
+        if (todo.isEmpty()) {
+            if (thenLink != null) linkFor = thenLink else toast(tr(R.string.backup_all_done_already, items.size))
+            return
+        }
+        if (!b.backup(todo)) return toast(tr(R.string.backup_connect_first))
+        val ids = todo.mapTo(HashSet()) { it.id }
+        if (backupWatch.isEmpty()) backupWatchTotal = 0
+        backupWatch = backupWatch + ids
+        backupWatchTotal += ids.size
+        if (thenLink != null) {
+            backupThenLink = BackupThenLink(thenLink, ids)
+        } else {
+            toast(
+                if (todo.size == items.size) tr(R.string.backup_started_n, todo.size)
+                else tr(R.string.backup_started_partial, items.size, items.size - todo.size, todo.size),
+            )
+        }
+    }
+    // 手动选的照片马上传、不等 Wi‑Fi；用流量且要传的超过 500 MB 时先问一次
+    fun backupSelected(items: List<MediaItem>, thenLink: List<MediaItem>? = null) {
+        val b = hooks.backup ?: return
+        val done = b.backedUpIds.value
+        val bytes = items.filter { !it.isCloud && it.id !in done }.sumOf { it.sizeBytes }
+        if (bytes > METERED_CONFIRM_BYTES && b.isMetered()) meteredBackup = MeteredAsk(items, bytes, thenLink) else startBackup(items, thenLink)
+    }
+    // 手动备份的照片全部传完时提示一声（没传完就离开也没关系，备份照常在后台进行）
+    hooks.backup?.let { b ->
+        LaunchedEffect(backupWatch.isNotEmpty()) {
+            if (backupWatch.isEmpty()) return@LaunchedEffect
+            b.backedUpIds.collect { ok ->
+                val left = backupWatch.filterTo(HashSet()) { it !in ok }
+                if (left.size == backupWatch.size) return@collect
+                if (left.isEmpty()) toast(tr(if (backupWatchTotal == 1) R.string.backup_finished_one else R.string.backup_finished))
+                backupWatch = left
+            }
+        }
     }
     fun deleteFromDevice(items: List<MediaItem>) {
         val safe = hooks.backup?.safelyBackedUp(items).orEmpty()
@@ -381,9 +595,9 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
         val b = hooks.backup ?: return
         toast(tr(R.string.restore_downloading, items.size))
         selection = emptySet()
-        uiScope.launch {
-            val n = runCatching { b.restore(items) }.getOrElse { e -> toast(e.message ?: tr(R.string.download_failed)); return@launch }
-            toast(tr(R.string.restore_done, n))
+        controller.launchLong(tr(R.string.cloud_restoring)) { report ->
+            val n = runCatching { b.restore(items, report) }.getOrElse { e -> appToast(e.message ?: tr(R.string.download_failed)); return@launchLong }
+            appToast(tr(R.string.restore_done, n))
         }
     }
 
@@ -419,9 +633,22 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
             onReady(items.map { got[it.id] ?: it.uri })
         }
     }
-    fun shareItems(items: List<MediaItem>) {
+    fun sendToApps(items: List<MediaItem>) {
         if (items.isEmpty()) return
         withFiles(items) { uris -> share(context, items, uris); selection = emptySet() }
+    }
+    // 分享：先弹分享面板（创建链接 / 添加到共享相册 / 发送到其他应用）；没有网盘模块时直接发送到其他应用
+    fun shareItems(items: List<MediaItem>) {
+        if (items.isEmpty()) return
+        if (hooks.backup == null) sendToApps(items) else shareSheet = items
+    }
+    fun addToShared(target: app.zyll.feature.gallery.ui.ShareTarget, items: List<MediaItem>) {
+        val b = hooks.backup ?: return
+        selection = emptySet()
+        controller.launchLong(tr(R.string.share_adding)) { _ ->
+            val n = runCatching { b.addToSharedAlbum(target, items) }.getOrElse { e -> appToast(e.message ?: tr(R.string.share_add_failed)); return@launchLong }
+            appToast(if (n == items.size) tr(R.string.share_added, n, target.name) else tr(R.string.share_added_partial, n, target.name, items.size - n))
+        }
     }
     val editAction: ((MediaItem) -> Unit)? = hooks.onEdit?.let { edit ->
         { item: MediaItem -> withFiles(listOf(item)) { uris -> edit(item.copy(uri = uris[0])) } }
@@ -439,12 +666,12 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
             return
         }
         perform(repo.requestWrite(listOf(item))) {
-            uiScope.launch {
+            controller.launchLong {
                 var ok = true
                 if (name != null) ok = repo.rename(item, name) && ok
                 if (takenAt != null) ok = repo.setTakenAt(listOf(item), takenAt) > 0 && ok
                 if (location != null || clearLocation) ok = repo.setLocation(listOf(item), location) > 0 && ok
-                toast(if (ok) tr(R.string.saved) else tr(R.string.info_partly_unsupported))
+                appToast(if (ok) tr(R.string.saved) else tr(R.string.info_partly_unsupported))
                 controller.refresh()
             }
         }
@@ -477,8 +704,18 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
         if (uris.isNotEmpty()) controller.ai.importFiles(uris)
     }
 
+    // 收藏：点下去先把按钮切过去（乐观更新），媒体库刷新后以实际状态为准；失败或用户取消就弹回去。
+    // 没开“媒体管理”时系统会弹确认框：那就等用户确认了再切，免得取消时来回闪
     val favoriteAction: ((List<MediaItem>) -> Unit)? = if (repo.supportsFavoritesAndTrash) {
-        { list -> perform(repo.favorite(list, !list.all { it.isFavorite })) }
+        { list ->
+            val target = !list.all { favOverride[it.id] ?: it.isFavorite }
+            val ids = list.map { it.id }
+            val asks = !repo.canManageMedia()
+            if (!asks) ids.forEach { favOverride[it] = target }
+            perform(repo.favorite(list, target), onFail = { ids.forEach { favOverride.remove(it) } }) {
+                if (asks) ids.forEach { favOverride[it] = target }
+            }
+        }
     } else null
 
     BackHandler(enabled = stack.isNotEmpty() || selection.isNotEmpty() || tab != Tab.Timeline) {
@@ -503,6 +740,16 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
     val discoverGrid = rememberLazyGridState()
     val collectionGrids = remember { mutableMapOf<Route, LazyGridState>() }
     LaunchedEffect(stack.size) { collectionGrids.keys.retainAll(stack.toSet()) }
+    /** 大图下面那一层的网格（首页时间线或相簿），没有网格时为 null。 */
+    fun gridBelow(viewer: Route): LazyGridState? {
+        val i = stack.indexOf(viewer)
+        if (i < 0) return null
+        return when (val below = stack.getOrNull(i - 1)) {
+            null -> if (tab == Tab.Timeline) timelineGrid else null
+            is Route.Collection -> collectionGrids[below]
+            else -> null
+        }
+    }
 
     fun selectionBarFor(inTrashView: Boolean, inArchive: Boolean = false): @Composable () -> Unit = {
         val all = { if (inTrashView) trashItems.filter { it.id in selection } else controller.byIds(selection.toList()) }
@@ -540,7 +787,10 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
                     BarAction(Icons.Outlined.DeleteOutline, tr(R.string.action_move_to_trash)) { moveToTrash(local(), cloudSkipped = cloud().size) },
                 ),
                 more = listOfNotNull(
-                    favoriteAction?.let { f -> BarAction(Icons.Outlined.FavoriteBorder, tr(R.string.action_favorite)) { f(local()) } },
+                    favoriteAction?.let { f ->
+                        val allFav = local().let { l -> l.isNotEmpty() && l.all { favOverride[it.id] ?: it.isFavorite } }
+                        BarAction(if (allFav) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, tr(if (allFav) R.string.action_unfavorite else R.string.action_favorite)) { f(local()) }
+                    },
                     if (withBackup) BarAction(Icons.Outlined.CloudUpload, tr(R.string.action_backup)) { backupSelected(local()) } else null,
                     if (inArchive) BarAction(Icons.Outlined.Unarchive, tr(R.string.action_unarchive)) { archive(local(), false) }
                     else BarAction(Icons.Outlined.Archive, tr(R.string.action_archive)) { archive(local(), true) },
@@ -567,18 +817,30 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
                 LocalMediaTransition provides MediaTransition(this@SharedTransitionLayout, this@AnimatedContent),
                 LocalScrollBusy provides controller.ai.uiBusy,
                 LocalMediaFlags provides flags,
+                app.zyll.feature.gallery.ui.LocalFavoriteOverrides provides favOverride,
             ) {
                 when (route) {
                     is Route.Viewer -> {
                         val items = remember(route, library, trashItems) {
                             if (route.inTrash) route.ids.toSet().let { ids -> trashItems.filter { it.id in ids } } else controller.byIds(route.ids)
                         }
-                        ViewerScreen(
+                        // 被系统回收后恢复的大图：照片列表（尤其网盘照片）还没加载好时先黑屏等着，等太久就退回上一层
+                        if (route.restored && items.none { it.id == route.startId }) {
+                            Box(Modifier.fillMaxSize().background(Color.Black))
+                            LaunchedEffect(route) {
+                                kotlinx.coroutines.delay(RESTORE_WAIT_MS)
+                                stack.remove(route)
+                            }
+                        } else ViewerScreen(
                             items = items,
                             startId = route.startId,
                             repo = repo,
                             inTrash = route.inTrash,
                             onClose = { pop(route) },
+                            onCurrentChange = { item ->
+                                route.currentId = item.id
+                                gridBelow(route)?.let { GridPositions.reveal(it, item.id) }
+                            },
                             actions = ViewerActions(
                                 onShare = { shareItems(listOf(it)) },
                                 onToggleFavorite = favoriteAction?.let { f -> { item: MediaItem -> f(listOf(item)) } },
@@ -589,6 +851,8 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
                                 onRestoreFromCloud = hooks.backup?.let { { item: MediaItem -> restoreFromCloud(listOf(item)) } },
                                 onDeleteFromCloud = hooks.backup?.let { { item: MediaItem -> cloudDelete = listOf(item) } },
                                 onEditInfo = { infoEditor = it },
+                                onBackup = hooks.backup?.let { { item: MediaItem -> backupSelected(listOf(item)) } },
+                                backingUp = backupWatch,
                             ),
                         )
                     }
@@ -597,7 +861,7 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
                         Scaffold(
                             topBar = {
                                 Row(
-                                    Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 6.dp),
+                                    Modifier.fillMaxWidth().topBarInsets().padding(horizontal = 4.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     IconButton(onClick = { pop(route) }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, tr(R.string.common_back)) }
@@ -635,6 +899,7 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
                         onBack = { pop(route) },
                         onOpen = { item, list -> openViewer(item, list, inTrash = route.source == Source.Trash) },
                         backup = hooks.backup,
+                        onShareAll = { list -> shareItems(list) },
                     )
                     null -> HomeScreen(
                         tab = tab,
@@ -647,6 +912,7 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
                         backup = if (hooks.backup != null) backupProgress else null,
                         backupActive = backupActiveState.value,
                         onOpenBackup = { tab = Tab.Me; selection = emptySet(); hooks.onOpenBackup() },
+                        meSubpage = hooks.meSubpage?.value == true,
                     ) { t, padding ->
                         when (t) {
                             Tab.Timeline -> TimelineScreen(
@@ -738,23 +1004,126 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
         )
     }
 
-    freeUp?.let { (items, skipped) ->
+    shareSheet?.let { items ->
+        val b = hooks.backup
+        // 几百张时逐张查要一会儿：放到后台算，算完前“创建链接”显示转圈
+        val reasonState = androidx.compose.runtime.produceState<String?>(SHARE_REASON_LOADING, items) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { b?.shareLinkUnavailableReason(items) }
+        }
+        // 先取成局部值：委托属性不能智能转换成 String
+        val reason = reasonState.value
+        val targets = remember(items) { b?.shareTargets().orEmpty() }
+        // 还没备份的本机照片：给“先备份，再创建链接”
+        val unbacked = remember(items) {
+            val done = b?.backedUpIds?.value.orEmpty()
+            items.filter { !it.isCloud && it.id !in done }
+        }
+        val loading = reason === SHARE_REASON_LOADING
+        app.zyll.feature.gallery.ui.ShareSheet(
+            count = items.size,
+            canLink = b != null && reason == null,
+            linkLoading = loading,
+            linkUnavailableReason = if (loading) null else reason?.takeIf { it.isNotEmpty() } ?: if (reason != null) tr(R.string.share_link_coming) else null,
+            // 只有“没备份”这个原因时才给“先备份”：没开加密等别的原因，备份完也建不了
+            unbackedCount = if (loading || reason == null || b?.shareLinkNeedsBackup(reason) != true) 0 else unbacked.size,
+            onBackupThenLink = { backupSelected(unbacked, thenLink = items) },
+            targets = targets,
+            onCreateLink = { linkFor = items },
+            onAddTo = { t -> addToShared(t, items) },
+            onNewSharedAlbum = hooks.onOpenShared?.let { open -> { stack.clear(); tab = Tab.Me; selection = emptySet(); open() } },
+            onSendToApps = { sendToApps(items) },
+            onDismiss = { shareSheet = null },
+        )
+    }
+    linkFor?.let { items ->
+        val b = hooks.backup
+        if (b != null) app.zyll.feature.gallery.ui.CreateLinkDialog(
+            count = items.size,
+            defaultTitle = remember(items) { defaultLinkTitle(items) },
+            check = { b.checkShareLink(items) },
+            // 创建框里说“有几项没备份”时，旁边给“先备份这几项”，传完回到创建框
+            unbackedCount = remember(items) {
+                val done = b.backedUpIds.value
+                items.count { !it.isCloud && it.id !in done }
+            },
+            onBackupMissing = {
+                val done = b.backedUpIds.value
+                val missing = items.filter { !it.isCloud && it.id !in done }
+                linkFor = null
+                backupSelected(missing, thenLink = items)
+            },
+            create = { title, password, expiresAt, originals, progress -> b.createShareLink(items, title, password, expiresAt, originals, progress) },
+            onDismiss = { linkFor = null; selection = emptySet() },
+        )
+    }
+    backupThenLink?.let { job ->
+        val b = hooks.backup
+        val ok by (b?.backedUpIds ?: kotlinx.coroutines.flow.MutableStateFlow(emptySet<Long>())).collectAsState()
+        val progress by (b?.progress ?: kotlinx.coroutines.flow.MutableStateFlow(BackupProgress())).collectAsState()
+        val done = job.ids.count { it in ok }
+        LaunchedEffect(done == job.ids.size) {
+            if (done != job.ids.size) return@LaunchedEffect
+            // 传完再看一次能不能建链接（比如还没开加密）：能建就直接打开创建链接，不能就回到分享面板显示原因
+            val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { b?.shareLinkUnavailableReason(job.items) }
+            backupThenLink = null
+            if (r == null) linkFor = job.items else shareSheet = job.items
+        }
         AlertDialog(
-            onDismissRequest = { freeUp = null },
-            title = { Text(tr(R.string.free_device_title, items.size)) },
+            onDismissRequest = {},
+            title = { Text(tr(R.string.share_backup_first_title)) },
             text = {
-                Text(
-                    tr(R.string.free_device_body) +
-                        if (skipped > 0) tr(R.string.free_device_skipped, skipped) else "",
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(tr(R.string.share_backup_first_progress, done, job.ids.size))
+                    LinearProgressIndicator(progress = { done.toFloat() / job.ids.size.coerceAtLeast(1) }, modifier = Modifier.fillMaxWidth())
+                    progress.problem?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                    Text(tr(R.string.share_backup_first_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    freeUp = null
-                    perform(repo.delete(items)) { selection = emptySet(); toast(tr(R.string.freed_size, formatSize(items.sumOf { it.sizeBytes }))) }
-                }) { Text(tr(R.string.common_delete)) }
+            confirmButton = { TextButton(onClick = { backupThenLink = null; toast(tr(R.string.share_backup_first_later)) }) { Text(tr(R.string.share_backup_first_background)) } },
+        )
+    }
+
+    meteredBackup?.let { ask ->
+        AlertDialog(
+            onDismissRequest = { meteredBackup = null },
+            title = { Text(tr(R.string.backup_metered_title)) },
+            text = { Text(tr(R.string.backup_metered_body, ask.items.size, formatSize(ask.bytes))) },
+            confirmButton = { TextButton(onClick = { meteredBackup = null; startBackup(ask.items, ask.thenLink) }) { Text(tr(R.string.backup_metered_go)) } },
+            dismissButton = { TextButton(onClick = { meteredBackup = null }) { Text(tr(R.string.common_cancel)) } },
+        )
+    }
+
+    freeUp?.let { (items, skipped) ->
+        val backup = hooks.backup
+        app.zyll.feature.gallery.ui.FreeUpFlow(
+            items = items,
+            title = tr(R.string.free_device_title, items.size),
+            body = tr(R.string.free_device_body) + if (skipped > 0) tr(R.string.free_device_skipped, skipped) else "",
+            confirmLabel = tr(R.string.common_delete),
+            verify = { list, progress, checked -> backup?.verifyForFree(list, progress, checked) ?: app.zyll.feature.gallery.ui.FreeCheckResult(emptyList(), 0, list.size) },
+            recheck = { list -> backup?.safelyBackedUp(list).orEmpty() },
+            // Android 11 起进系统回收站而不是直接删：万一网盘那份后来出了问题，30 天内还能找回。
+            // 回收站里的照片还占空间，所以之后说明一下，并给“现在清空”。更早的系统没有回收站，是直接删掉的
+            onDelete = { safe ->
+                perform(repo.trash(safe)) { partly ->
+                    // 只确认了前几批时，后面那些没进回收站：清空回收站和释放大小都只算进去了的
+                    val done = partly?.let(safe::take) ?: safe
+                    selection = emptySet()
+                    if (app.zyll.feature.gallery.ui.freeUpUsesTrash()) freeTrashed = done
+                    else toast(tr(R.string.freed_size, formatSize(done.sumOf { it.sizeBytes })))
+                }
             },
-            dismissButton = { TextButton(onClick = { freeUp = null }) { Text(tr(R.string.common_cancel)) } },
+            onDismiss = { freeUp = null },
+        )
+    }
+
+    freeTrashed?.let { items ->
+        val size = formatSize(items.sumOf { it.sizeBytes })
+        app.zyll.feature.gallery.ui.FreeTrashedDialog(
+            count = items.size,
+            size = size,
+            onEmpty = { perform(repo.delete(items)) { toast(tr(R.string.freed_size, size)) } },
+            onDismiss = { freeTrashed = null },
         )
     }
 
@@ -765,6 +1134,38 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
             onDismiss = { infoEditor = null },
             onSave = { name, takenAt, loc, clear -> infoEditor = null; saveInfo(item, name, takenAt, loc, clear) },
         )
+    }
+
+    // 从网盘删很多张时显示进度；可以先关掉，操作在后台继续
+    val longProgress by controller.longProgress.collectAsState()
+    var hiddenLong by remember { mutableStateOf<Any?>(null) }
+    longProgress?.takeIf { it.total > 1 && it.token !== hiddenLong }?.let { p ->
+        AlertDialog(
+            onDismissRequest = { hiddenLong = p.token },
+            title = { Text(p.label) },
+            text = {
+                Column {
+                    LinearProgressIndicator(progress = { p.done / p.total.toFloat() }, modifier = Modifier.fillMaxWidth())
+                    Text("${p.done} / ${p.total}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                }
+            },
+            confirmButton = { TextButton(onClick = { hiddenLong = p.token }) { Text(tr(R.string.long_task_background)) } },
+        )
+    }
+    // 点了“在后台继续”：底部留一个小标记，看得出还在进行，点它再打开进度框
+    longProgress?.takeIf { it.total > 1 && it.token === hiddenLong }?.let { p ->
+        androidx.compose.ui.window.Popup(alignment = Alignment.BottomCenter) {
+            Surface(
+                onClick = { hiddenLong = null },
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.inverseSurface,
+                contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                shadowElevation = 4.dp,
+                modifier = Modifier.navigationBarsPadding().padding(bottom = 88.dp),
+            ) {
+                Text("${p.label}  ${p.done} / ${p.total}", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+            }
+        }
     }
 
     busy?.let { task ->
@@ -823,9 +1224,9 @@ fun GalleryApp(controller: GalleryController, hooks: GalleryHooks) {
                     cloudDelete = null
                     selection = emptySet()
                     val b = hooks.backup ?: return@TextButton
-                    uiScope.launch {
-                        val n = b.deleteFromCloud(items)
-                        toast(if (n > 0) tr(R.string.cloud_deleted_n, n) else tr(R.string.delete_failed_network))
+                    controller.launchLong(tr(R.string.cloud_deleting)) { report ->
+                        val n = b.deleteFromCloud(items, report)
+                        appToast(if (n > 0) tr(R.string.cloud_deleted_n, n) else tr(R.string.delete_failed_network))
                     }
                 }) { Text(tr(R.string.action_delete_forever), color = MaterialTheme.colorScheme.error) }
             },
@@ -875,6 +1276,7 @@ private fun CollectionScreen(
     onBack: () -> Unit,
     onOpen: (MediaItem, List<MediaItem>) -> Unit,
     backup: BackupIndicator?,
+    onShareAll: ((List<MediaItem>) -> Unit)? = null,
 ) {
     val ai = controller.ai
     val backedUp = LocalMediaFlags.current?.backedUp?.value ?: emptySet()
@@ -890,8 +1292,15 @@ private fun CollectionScreen(
             else -> null
         }
     }
+    // 没有 AI 时的关键词搜索要逐张算日期标题，照片多时放到后台线程，不卡输入
+    val keywordQuery = (source as? Source.Search)?.query?.takeIf { aiIds == null }
+    // 第一次还没算完时是 null：先转圈，不闪“没有找到”
+    val keywordHits by produceState<List<MediaItem>?>(null, keywordQuery, library.items) {
+        value = if (keywordQuery == null) emptyList()
+        else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { keywordSearch(library.items, keywordQuery) }
+    }
     // 只在数据真的变了时重新筛选，否则每次重组都会生成新列表、网格整体重排
-    val items: List<MediaItem> = remember(source, library, trashItems, aiIds, if (source is Source.CloudAlbum) backedUp else null) { when (source) {
+    val items: List<MediaItem> = remember(source, library, trashItems, aiIds, keywordHits, if (source is Source.CloudAlbum) backedUp else null) { when (source) {
         is Source.Album -> library.local.filter { it.bucketId == source.bucketId }
         Source.Favorites -> library.local.filter { it.isFavorite }
         Source.Videos -> library.items.filter { it.isVideo }
@@ -903,7 +1312,7 @@ private fun CollectionScreen(
         is Source.CloudAlbum -> cloudAlbumItems(library, backedUp, source.name)
         is Source.Fixed -> controller.byIds(source.ids)
         is Source.Category -> controller.byIds(aiIds.orEmpty())
-        is Source.Search -> aiIds?.let { controller.byIds(it) } ?: keywordSearch(library.items, source.query)
+        is Source.Search -> aiIds?.let { controller.byIds(it) } ?: keywordHits.orEmpty()
     } }
     val ranked = source is Source.Category || (source is Source.Search && aiIds != null)
 
@@ -911,7 +1320,7 @@ private fun CollectionScreen(
         topBar = {
             AnimatedContent(selection.isNotEmpty(), transitionSpec = { barFade() }, label = "collectionBar") { selecting ->
             if (selecting) selectionBar() else Row(
-                Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().topBarInsets().padding(horizontal = 4.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, tr(R.string.common_back)) }
@@ -932,6 +1341,10 @@ private fun CollectionScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // 相册页直接分享整个相册（和谷歌相册一样）：本机相簿、网盘相簿、收藏
+                if (onShareAll != null && items.isNotEmpty() && (source is Source.Album || source is Source.CloudAlbum || source == Source.Favorites || source is Source.Fixed)) {
+                    IconButton(onClick = { onShareAll(items) }) { Icon(Icons.Outlined.Share, tr(R.string.action_share)) }
+                }
                 // 本机相簿：是否同步到网盘（和“我的 → 网盘备份”里的相簿设置是同一份）
                 if (source is Source.Album && backup != null) {
                     val skipped by backup.skippedAlbums.collectAsState()
@@ -944,7 +1357,9 @@ private fun CollectionScreen(
             }
         },
     ) { padding ->
-        if (items.isEmpty()) {
+        if (keywordQuery != null && keywordHits == null) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        } else if (items.isEmpty()) {
             EmptyState(
                 when (source) {
                     Source.Trash -> tr(R.string.empty_trash)
@@ -989,12 +1404,16 @@ private fun HomeScreen(
     backup: BackupProgress?,
     backupActive: Boolean,
     onOpenBackup: () -> Unit,
+    meSubpage: Boolean = false,
     content: @Composable (Tab, PaddingValues) -> Unit,
 ) {
     Scaffold(
         topBar = {
             AnimatedContent(if (selecting) null else tab, transitionSpec = { barFade() }, label = "homeBar") { t ->
-                if (t == null) selectionBar() else HomeTopBar(
+                if (t == null) selectionBar()
+                // 子页面自带标题行：这里只留出状态栏的高度
+                else if (t == Tab.Me && meSubpage) Spacer(Modifier.fillMaxWidth().topBarInsets())
+                else HomeTopBar(
                     title = t.title,
                     subtitle = when (t) {
                         Tab.Timeline -> if (library.loaded) tr(R.string.common_items_n, library.items.size) else null
@@ -1066,8 +1485,9 @@ private fun routeTransition(from: List<Route>, to: List<Route>): ContentTransfor
     val viewer = (if (push) to.lastOrNull() else from.lastOrNull()) is Route.Viewer
     return when {
         // 底下的网格保持可见（几乎不透明），等大图层淡入完成
-        viewer && push -> fadeIn(tween(260)) togetherWith fadeOut(tween(300), targetAlpha = 0.99f)
-        viewer -> (EnterTransition.None togetherWith fadeOut(tween(260))).apply { targetContentZIndex = -1f }
+        // 时长和照片放大缩小（共享元素）一致，背景和照片同时到位，收尾不会顿一下
+        viewer && push -> fadeIn(tween(MEDIA_MS)) togetherWith fadeOut(tween(MEDIA_MS), targetAlpha = 0.99f)
+        viewer -> (EnterTransition.None togetherWith fadeOut(tween(MEDIA_MS))).apply { targetContentZIndex = -1f }
         push -> (slideInHorizontally(pageTween()) { it / 3 } + fadeIn(pageTween())) togetherWith
             (slideOutHorizontally(pageTween()) { -it / 8 } + fadeOut(tween(PAGE_MS / 2)))
         else -> ((slideInHorizontally(pageTween()) { -it / 8 } + fadeIn(pageTween())) togetherWith
@@ -1082,11 +1502,12 @@ private fun keywordSearch(items: List<MediaItem>, q: String): List<MediaItem> {
     // 中文的日期和类型关键词总能用，另外再认当前语言的写法
     val videoWords = setOf("视频", tr(R.string.quick_videos).lowercase())
     val screenshotWords = setOf("截图", "截屏", tr(R.string.quick_screenshots).lowercase())
+    val today = java.time.LocalDate.now()
     return items.filter {
         val d = it.localDate()
         it.displayName.lowercase().contains(k) || it.bucketName.lowercase().contains(k) ||
             "${d.year}年${d.monthValue}月${d.dayOfMonth}日".contains(k) || d.toString().contains(k) ||
-            dayTitle(d).lowercase().contains(k) ||
+            dayTitle(d, today).lowercase().contains(k) ||
             (k in videoWords && it.isVideo) || (k in screenshotWords && it.isScreenshot)
     }
 }
@@ -1098,7 +1519,7 @@ private fun SelectionBar(count: Int, onClear: () -> Unit, actions: List<BarActio
     var menu by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
         Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 6.dp),
+            Modifier.fillMaxWidth().topBarInsets().padding(horizontal = 4.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onClear) { Icon(Icons.Outlined.Close, tr(R.string.selection_clear)) }
@@ -1300,6 +1721,23 @@ private fun InfoEditDialog(
     )
 }
 
+/** 分享链接的默认名字：都在同一个相簿就用相簿名，否则用拍摄日期（范围）。 */
+private fun defaultLinkTitle(items: List<MediaItem>): String {
+    val bucket = items.map { it.bucketName }.distinct().singleOrNull()?.takeIf { it.isNotBlank() }
+    if (bucket != null) return bucket
+    val days = items.map { it.localDate() }
+    val first = days.minOrNull() ?: return ""
+    val last = days.maxOrNull() ?: first
+    val today = java.time.LocalDate.now()
+    return if (first == last) dayTitle(first, today) else dayTitle(first, today) + " – " + dayTitle(last, today)
+}
+
+/** 恢复出来的大图最多等照片列表加载这么久。 */
+private const val RESTORE_WAIT_MS = 4_000L
+
+/** 用流量手动备份时，超过这个大小先确认一次。 */
+private const val METERED_CONFIRM_BYTES = 500L * 1024 * 1024
+
 private fun formatSize(bytes: Long): String = when {
     bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1L shl 30).toDouble())
     bytes >= 1L shl 20 -> "%.0f MB".format(bytes / (1L shl 20).toDouble())
@@ -1316,7 +1754,7 @@ private fun HomeTopBar(
     onOpenBackup: () -> Unit = {},
 ) {
     Row(
-        Modifier.fillMaxWidth().statusBarsPadding().padding(start = 18.dp, end = 6.dp, top = 10.dp, bottom = 6.dp),
+        Modifier.fillMaxWidth().topBarInsets().padding(start = 18.dp, end = 6.dp, top = 10.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(title, style = MaterialTheme.typography.headlineMedium)
@@ -1416,7 +1854,7 @@ private fun PartialAccessBanner(onManage: () -> Unit) {
 @Composable
 private fun PermissionScreen(onRequest: () -> Unit) {
     Column(
-        Modifier.fillMaxSize().statusBarsPadding().padding(32.dp),
+        Modifier.fillMaxSize().topBarInsets().padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

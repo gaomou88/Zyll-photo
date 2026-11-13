@@ -1,5 +1,7 @@
 import java.util.Properties
 
+import java.util.zip.ZipFile
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -17,8 +19,8 @@ android {
         applicationId = appId
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 7
+        versionName = "0.1.6"
         // 网盘登录（AppAuth）回调用的 scheme
         manifestPlaceholders["appAuthRedirectScheme"] = appId
     }
@@ -54,6 +56,7 @@ android {
         }
     }
 
+
     // 应用内语言：英文（默认）、简体中文、繁体中文、日文。Android 13+ 可以在系统设置里单独给 App 选语言
     androidResources {
         generateLocaleConfig = true
@@ -77,6 +80,11 @@ android {
 
     packaging {
         resources.excludes += setOf("META-INF/versions/9/OSGI-INF/MANIFEST.MF", "META-INF/LICENSE*", "META-INF/NOTICE*")
+        // GPUImage 自带的原生库只按 4 KB 对齐（16 KB 内存页的手机装不上），而且只给相机预览和它自己的离屏读图用；
+        // 修图改用 GpuRender（纯 Java 读图），用不到它
+        jniLibs.excludes += "**/libyuv-decoder.so"
+        // 原生库不压缩、按 16 KB 对齐放进安装包（AGP 8.5.1+ 默认就是这样，这里写明）
+        jniLibs.useLegacyPackaging = false
     }
 }
 

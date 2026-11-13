@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="links_title">Share links</string>
+    <string name="links_empty">No share links yet. Select photos in your library, tap Share, then Create link.</string>
+    <string name="links_count">%1$d items</string>
+    <string name="links_forever">Never expires</string>
+    <string name="links_until">Expires %1$s</string>
+    <string name="links_expired">Expired</string>
+    <string name="links_originals_on">Originals downloadable</string>
+    <string name="links_originals_off">No downloads</string>
+    <string name="links_copy">Copy link</string>
+    <string name="links_copied">Link copied</string>
+    <string name="links_revoke">Revoke</string>
+    <string name="links_revoking">Revoking…</string>
+    <string name="links_revoke_title">Revoke this link?</string>
+    <string name="links_revoke_body">The link stops working right away and its photo copies are deleted. Photos people have already viewed or downloaded can\'t be taken back.</string>
+    <string name="links_revoked">Link revoked and its copies deleted. Photos people already viewed or downloaded can\'t be taken back.</string>
+    <string name="sharing_off_links_title">Revoke share links first</string>
+    <string name="sharing_off_links_body">%1$d share links still point to photos in this drive. Before turning sharing off, revoke them in Me → Shared albums → Share links.</string>
+    <string name="links_send">Send</string>
+</resources>

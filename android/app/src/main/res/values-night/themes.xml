@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式：用深色主题和 ZyllTheme 的深色背景，冷启动时不再先闪一下白屏 -->
+    <style name="Theme.Zyll" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/zyll_window_bg</item>
+    </style>
+    <color name="zyll_window_bg">#FF111413</color>
+</resources>

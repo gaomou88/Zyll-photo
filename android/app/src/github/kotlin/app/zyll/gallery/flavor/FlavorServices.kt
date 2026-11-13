@@ -46,5 +46,14 @@ object FlavorServices {
         emptyList()
 
     /** GitHub 版不含编辑器。 */
+    fun attachPicker(@Suppress("UNUSED_PARAMETER") context: Context, @Suppress("UNUSED_PARAMETER") controller: app.zyll.feature.gallery.GalleryController) = Unit
+
+    @Composable
+    fun PickerBlurSetting(
+        @Suppress("UNUSED_PARAMETER") filter: app.zyll.feature.gallery.SensitiveFilter,
+        @Suppress("UNUSED_PARAMETER") entitlements: Entitlements,
+        @Suppress("UNUSED_PARAMETER") onOpenCloudMedia: () -> Unit,
+    ) = Unit
+
     fun editorIntent(@Suppress("UNUSED_PARAMETER") context: Context, @Suppress("UNUSED_PARAMETER") uri: Uri): Intent? = null
 }

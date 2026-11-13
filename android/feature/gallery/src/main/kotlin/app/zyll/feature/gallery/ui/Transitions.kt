@@ -5,7 +5,6 @@ import androidx.compose.animation.BoundsTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
@@ -26,8 +25,11 @@ const val PAGE_MS = 340
 
 fun <T> pageTween(delay: Int = 0) = tween<T>(PAGE_MS, delayMillis = delay, easing = EmphasizedEasing)
 
+/** 打开 / 关闭大图的时长：照片放大缩小和背景淡入淡出用同一个时长、同一条曲线，一起开始一起结束。 */
+const val MEDIA_MS = 300
+
 @OptIn(ExperimentalSharedTransitionApi::class)
-private val mediaBounds = BoundsTransform { _, _ -> spring(dampingRatio = 0.86f, stiffness = 420f) }
+private val mediaBounds = BoundsTransform { _, _ -> tween(MEDIA_MS, easing = EmphasizedEasing) }
 
 /** 给一张照片的画面加上共享元素标记；没有页面切换环境（比如预览）时什么也不做。 */
 @OptIn(ExperimentalSharedTransitionApi::class)

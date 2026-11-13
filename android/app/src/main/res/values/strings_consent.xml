@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="consent_title">Welcome to Zyll</string>
+    <string name="consent_body">Before you start, please read the Terms of use and the Privacy policy. Zyll browses and searches your photos on this phone; nothing is uploaded unless you turn on cloud backup, and backups go only to your own Google Drive or OneDrive.\n\nTap “Agree” to accept both and continue.</string>
+    <string name="consent_agree">Agree</string>
+    <string name="consent_decline">Disagree and exit</string>
+</resources>

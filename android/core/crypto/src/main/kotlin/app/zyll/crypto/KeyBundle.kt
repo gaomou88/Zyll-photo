@@ -30,14 +30,26 @@ data class KeyBundleFile(
     val version: Int = 1,
     val vaultId: String,
     val slots: List<KeySlot>,
+    /** 修改次数的先后（毫秒时间，单调递增）。旧版本没有这个字段，按 0 算。见 spec/keybundle.md §5。 */
+    val rev: Long? = null,
+    /** 用 K_wrap 派生的密钥对 vaultId、rev 和全部槽位算的 HMAC，证明这份是手里有这套密钥的设备写的。 */
+    val mac: String? = null,
 )
 
 /** Argon2id 参数。默认值见 spec/keybundle.md。 */
 data class Argon2Params(val memoryKiB: Int = 65536, val iterations: Int = 3, val parallelism: Int = 1) {
     init {
         require(memoryKiB >= 8192) { "m must be >= 8192 KiB" }
+        // 上限：网盘上的密钥包可能被改过，参数太大会让解锁时内存耗尽闪退、或者卡很久
+        require(memoryKiB <= MAX_MEMORY_KIB) { "m must be <= $MAX_MEMORY_KIB KiB" }
         require(iterations >= 1) { "t must be >= 1" }
+        require(iterations <= MAX_ITERATIONS) { "t must be <= $MAX_ITERATIONS" }
         require(parallelism == 1) { "p must be 1 (browser compatibility)" }
+    }
+
+    companion object {
+        const val MAX_MEMORY_KIB = 1 shl 20 // 1 GiB
+        const val MAX_ITERATIONS = 10
     }
 }
 
@@ -75,7 +87,9 @@ object KeyBundle {
             pwSalt = random.nextBytes(16), pwNonce = random.nextBytes(12),
             rcSalt = random.nextBytes(16), rcNonce = random.nextBytes(12),
         )
-        return Created(encode(file), UnlockedVault(vaultId, mk), recovery)
+        val vault = UnlockedVault(vaultId, mk)
+        // 新建时就带上 rev 和 mac：以后别的设备据此判断哪份更新、是不是同一套密钥写的
+        return Created(encode(sign(file.copy(rev = System.currentTimeMillis()), vault.wrapKey)), vault, recovery)
     }
 
     /** 确定性版本，供测试向量使用。 */
@@ -143,11 +157,66 @@ object KeyBundle {
     }
 
     /** 改密码：只替换 password 槽位，MK 不变。 */
-    fun changePassword(text: String, vault: UnlockedVault, newPassword: String, params: Argon2Params = Argon2Params(), random: RandomSource = SecureRandomSource): String {
+    fun changePassword(text: String, vault: UnlockedVault, newPassword: String, params: Argon2Params = Argon2Params(), random: RandomSource = SecureRandomSource): String =
+        rewrap(text, vault, newPassword = newPassword, newRecoveryKey = null, minRev = 0, params = params, random = random)
+
+    /**
+     * 重新包裹主密钥：[newPassword] 不为空时换掉 password 槽位，[newRecoveryKey] 不为空时换掉 recovery 槽位，
+     * 其余槽位原样保留。MK 不变，所有已上传的照片都不用重新加密。
+     * 新的 rev 取“现在”和 [minRev] + 1 里较大的那个，再附上 mac（见 spec/keybundle.md §5）。
+     */
+    fun rewrap(
+        text: String, vault: UnlockedVault, newPassword: String?, newRecoveryKey: ByteArray?, minRev: Long,
+        params: Argon2Params = Argon2Params(), random: RandomSource = SecureRandomSource, now: Long = System.currentTimeMillis(),
+    ): String {
         val f = parse(text)
-        val newSlot = passwordSlot(f.vaultId, vault.masterKey, newPassword, params, random.nextBytes(16), random.nextBytes(12))
-        return encode(f.copy(slots = f.slots.map { if (it.type == SLOT_PASSWORD) newSlot else it }))
+        require(f.vaultId == vault.vaultId) { "vault mismatch" }
+        var slots = f.slots
+        if (newPassword != null) {
+            val s = passwordSlot(f.vaultId, vault.masterKey, newPassword, params, random.nextBytes(16), random.nextBytes(12))
+            slots = if (slots.any { it.type == SLOT_PASSWORD }) slots.map { if (it.type == SLOT_PASSWORD) s else it } else slots + s
+        }
+        if (newRecoveryKey != null) {
+            val s = recoverySlot(f.vaultId, vault.masterKey, newRecoveryKey, random.nextBytes(16), random.nextBytes(12))
+            slots = if (slots.any { it.type == SLOT_RECOVERY }) slots.map { if (it.type == SLOT_RECOVERY) s else it } else slots + s
+        }
+        val rev = maxOf(now, maxOf(minRev, f.rev ?: 0) + 1)
+        return encode(sign(f.copy(slots = slots, rev = rev), vault.wrapKey))
     }
+
+    /** 这份密钥包的修改先后；旧版本没有 rev 时为 0。 */
+    fun revOf(f: KeyBundleFile): Long = f.rev ?: 0
+
+    /** 附上 mac。 */
+    fun sign(f: KeyBundleFile, wrapKey: ByteArray): KeyBundleFile = f.copy(mac = b64.encodeToString(macOf(f, wrapKey)))
+
+    /** mac 对得上 [wrapKey]（也就是这份是手里有同一套密钥的设备写的）。没有 mac 的旧密钥包返回 false。 */
+    fun verify(f: KeyBundleFile, wrapKey: ByteArray): Boolean {
+        val mac = f.mac ?: return false
+        val got = try { b64d.decode(mac) } catch (_: IllegalArgumentException) { return false }
+        return java.security.MessageDigest.isEqual(got, macOf(f, wrapKey))
+    }
+
+    private fun macOf(f: KeyBundleFile, wrapKey: ByteArray): ByteArray {
+        val key = Primitives.hkdfSha256(wrapKey, ByteArray(0), "zyll/v1/keybundle-mac".toByteArray(), 32)
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        mac.init(javax.crypto.spec.SecretKeySpec(key, "HmacSHA256"))
+        return mac.doFinal(macInput(f))
+    }
+
+    /** 参与 mac 的内容，逐项用换行隔开；没有的数字字段写空串。和网页端 keybundle.ts 的 macInput 一致。 */
+    fun macInput(f: KeyBundleFile): ByteArray {
+        val sb = StringBuilder("zyll-keybundle-mac/v1\n").append(f.vaultId).append('\n').append(f.rev ?: 0).append('\n')
+        for (s in f.slots) {
+            val k = s.kdf
+            listOf(s.type, k.alg, k.v?.toString() ?: "", k.m?.toString() ?: "", k.t?.toString() ?: "", k.p?.toString() ?: "", k.salt, s.nonce, s.wrappedMk)
+                .forEach { sb.append(it).append('\n') }
+        }
+        return sb.toString().toByteArray(Charsets.UTF_8)
+    }
+
+    /** 新生成一个恢复密钥（32 字节随机数）。 */
+    fun newRecoveryKey(random: RandomSource = SecureRandomSource): ByteArray = random.nextBytes(32)
 
     fun passwordBytes(password: String): ByteArray =
         Normalizer.normalize(password, Normalizer.Form.NFC).toByteArray(Charsets.UTF_8)
@@ -184,7 +253,7 @@ object RecoveryKey {
         return out.toByteArray()
     }
 
-    private fun base32(data: ByteArray): String {
+    internal fun base32(data: ByteArray): String {
         val sb = StringBuilder()
         var buffer = 0
         var bits = 0

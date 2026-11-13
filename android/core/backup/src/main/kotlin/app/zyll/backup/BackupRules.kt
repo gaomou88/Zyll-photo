@@ -77,7 +77,7 @@ class CloudProvider private constructor(val kind: DriveKind, val slot: Int) : Co
 /**
  * 能登录几个网盘账号。
  * - Play 免费版：Google 和微软各一个（[perKind] = 1，[total] = 2）
- * - Play Pro：每种多个
+ * - Play Pro：Google Drive、OneDrive 各最多 4 个
  * - GitHub 开源版：一共只能一个（[total] = 1）
  */
 data class AccountLimits(val perKind: Int, val total: Int) {
@@ -86,28 +86,32 @@ data class AccountLimits(val perKind: Int, val total: Int) {
         signedIn.size < total && signedIn.count { it.kind == kind } < perKind
 
     /**
-     * 已登录的账号里哪些在限额以内（可以备份）。按槽位先后算：每种网盘的第一个账号先算，
-     * 超出的（比如 Pro 退款后多出来的账号）保留登录但暂停备份。
+     * 已登录的账号里哪些在限额以内（可以备份）。按 [order] 先后算（默认按槽位；App 传用户排的顺序，
+     * 排在前面的先保留），超出的（比如 Pro 退款后多出来的账号）保留登录但暂停备份。
      */
-    fun allowed(signedIn: Collection<CloudProvider>): Set<CloudProvider> {
+    fun allowed(signedIn: Collection<CloudProvider>, order: List<CloudProvider> = signedIn.sorted()): Set<CloudProvider> {
+        val set = signedIn.toSet()
         val kept = ArrayList<CloudProvider>()
-        for (p in signedIn.sorted()) if (canAdd(p.kind, kept)) kept += p
+        for (p in order.filter { it in set } + signedIn.sorted().filter { it !in order }) if (p !in kept && canAdd(p.kind, kept)) kept += p
         return kept.toSet()
     }
 
     companion object {
         val FREE = AccountLimits(perKind = 1, total = 2)
-        val PRO = AccountLimits(perKind = 5, total = 10)
+        val PRO = AccountLimits(perKind = 4, total = 8)
         val SINGLE = AccountLimits(perKind = 1, total = 1)
     }
 }
 
-/** 没有单独指定的相簿怎么备份。 */
+/**
+ * 没有单独指定的相簿怎么备份。不管哪种方式，同一张照片在同一种网盘里只放一份
+ * （比如登录了 3 个 Google Drive，照片只进其中一个）。
+ */
 enum class BackupMode {
-    /** 每张照片同时备份到所有已连接的网盘。 */
+    /** 每种网盘各放一份：Google Drive 一份、OneDrive 一份，各自放进排序最靠前、还有空间的那个账号。 */
     Mirror,
 
-    /** 先放到首选网盘，首选网盘满了再放到另一个。 */
+    /** 一共只放一份：放进排序第一个还有空间的账号，满了顺延到下一个。 */
     Overflow,
 }
 
@@ -116,15 +120,27 @@ sealed interface AlbumRule {
     /** 这个相簿不备份。 */
     data object Skip : AlbumRule
 
-    /** 这个相簿只备份到这些网盘（满了也不换别的盘）。 */
+    /**
+     * 这个相簿每种网盘各放一份（和 [BackupMode.Mirror] 一样，按用户排序选账号）。
+     * 不存具体账号，以后加了新账号也跟着生效。
+     */
+    data object EachKind : AlbumRule
+
+    /**
+     * 这个相簿只备份到这些网盘（满了也不换别的盘）。每种网盘只该有一个账号；
+     * 旧数据里同一种网盘列了几个时，按排序只用第一个放得下的。
+     */
     data class To(val providers: Set<CloudProvider>) : AlbumRule
 }
 
 data class BackupSettings(
     val enabled: Boolean = false,
     val mode: BackupMode = BackupMode.Overflow,
-    /** [BackupMode.Overflow] 时先用哪个盘。 */
-    val primary: CloudProvider = CloudProvider.GoogleDrive,
+    /**
+     * 用户给已连接网盘排的顺序（第一个就是首选）。没列出的账号排在后面，按槽位先后。
+     * 备份时总是先用排在前面、还有空间的账号。
+     */
+    val order: List<CloudProvider> = emptyList(),
     /** 按相簿（bucketId）单独指定；没列出的相簿按 [mode]。 */
     val albumRules: Map<Long, AlbumRule> = emptyMap(),
     val includeVideos: Boolean = true,
@@ -134,7 +150,16 @@ data class BackupSettings(
     val backupNewAlbums: Boolean = true,
     /** 已经见过的相簿（用来判断哪些是新相簿）。 */
     val knownAlbums: Set<Long> = emptySet(),
-)
+) {
+    /** 首选网盘：排序里的第一个。 */
+    val primary: CloudProvider get() = order.firstOrNull() ?: CloudProvider.GoogleDrive
+
+    /** 把 [all] 按用户的排序排好（没排过的放在后面，按槽位先后）。 */
+    fun ranked(all: Collection<CloudProvider>): List<CloudProvider> {
+        val set = all.toSet()
+        return order.filter { it in set }.distinct() + set.filter { it !in order }.sorted()
+    }
+}
 
 /** 一个网盘此刻的状态。[freeBytes] 为 null 表示查不到剩余空间（当作够用）。 */
 data class DriveStatus(val provider: CloudProvider, val connected: Boolean, val freeBytes: Long?)
@@ -144,8 +169,11 @@ data class BackupCandidate(val mediaId: Long, val bucketId: Long, val sizeBytes:
 
 /** 一项该去哪儿。 */
 sealed interface Route {
-    /** 上传到这些盘（可能为多个）。 */
-    data class Upload(val providers: List<CloudProvider>) : Route
+    /**
+     * 上传到这些盘（可能为多个）。[full]：按规则也该放一份、但已经满了的盘（比如“每种网盘各一份”时其中一种满了），
+     * 界面上要提示“XX 已满”，不能悄悄少放一份。
+     */
+    data class Upload(val providers: List<CloudProvider>, val full: List<CloudProvider> = emptyList()) : Route
 
     /** 按规则不需要备份。 */
     data object Skipped : Route
@@ -159,11 +187,15 @@ sealed interface Route {
 
 /**
  * 决定每张照片备份到哪里。会在内部记账：分配出去的大小从剩余空间里扣掉，
- * 这样一批照片里后面的照片能正确地“溢出”到另一个盘。
+ * 这样一批照片里后面的照片能正确地“溢出”到下一个账号。
+ *
+ * 同一张照片在同一种网盘里最多一份：已经在某个 Google Drive 账号里有了，就不会再传到另一个 Google Drive 账号。
  */
 class BackupRouter(private val settings: BackupSettings, drives: List<DriveStatus>) {
     private val connected = drives.filter { it.connected }.map { it.provider }.toSet()
     private val free = drives.associate { it.provider to it.freeBytes }.toMutableMap()
+    /** 按用户排序的全部账号（含没连上的）。 */
+    private val ranked = settings.ranked(drives.map { it.provider })
 
     /** 每个盘留一点余量，不把用户的网盘塞到 100%。 */
     var reserveBytes: Long = 50L * 1024 * 1024
@@ -171,35 +203,63 @@ class BackupRouter(private val settings: BackupSettings, drives: List<DriveStatu
     /** [alreadyOn]：这张照片已经在哪些盘上有备份。 */
     fun route(item: BackupCandidate, alreadyOn: Set<CloudProvider> = emptySet()): Route {
         if (item.isVideo && !settings.includeVideos) return Route.Skipped
-        val rule = settings.albumRules[item.bucketId]
-        val wanted: List<CloudProvider> = when (rule) {
-            AlbumRule.Skip -> return Route.Skipped
-            is AlbumRule.To -> CloudProvider.entries.filter { it in rule.providers }
+        return when (val rule = settings.albumRules[item.bucketId]) {
+            AlbumRule.Skip -> Route.Skipped
+            AlbumRule.EachKind -> perKind(item, alreadyOn, DriveKind.entries) { kind -> ranked.filter { it.kind == kind } }
+            is AlbumRule.To -> {
+                if (rule.providers.isEmpty()) return Route.Skipped
+                perKind(item, alreadyOn, rule.providers.map { it.kind }.distinct()) { kind -> ranked.filter { it.kind == kind && it in rule.providers } + rule.providers.filter { it.kind == kind && it !in ranked }.sorted() }
+            }
             null -> when (settings.mode) {
-                BackupMode.Mirror -> CloudProvider.entries.toList()
+                BackupMode.Mirror -> perKind(item, alreadyOn, DriveKind.entries) { kind -> ranked.filter { it.kind == kind } }
                 BackupMode.Overflow -> {
                     // 已经在任意一个盘上有了就算备份完成
-                    if (alreadyOn.isNotEmpty()) return Route.Upload(emptyList())
-                    return overflow(item)
+                    if (alreadyOn.isNotEmpty()) Route.Upload(emptyList()) else single(item)
                 }
             }
         }
-        val targets = wanted.filter { it in connected }
-        if (targets.isEmpty()) return if (wanted.isEmpty()) Route.Skipped else Route.NoDrive
-        val missing = targets.filter { it !in alreadyOn }
-        val fits = missing.filter { fits(it, item.sizeBytes) }
-        if (missing.isNotEmpty() && fits.isEmpty()) return Route.Full(missing)
-        fits.forEach { take(it, item.sizeBytes) }
-        return Route.Upload(fits)
     }
 
-    private fun overflow(item: BackupCandidate): Route {
-        val order = listOf(settings.primary) + CloudProvider.entries.filter { it != settings.primary }
-        val candidates = order.filter { it in connected }
+    /** 每种网盘各放一份：这种网盘里已经有了就跳过，没有就放进排在最前、放得下的那个账号。 */
+    private fun perKind(item: BackupCandidate, alreadyOn: Set<CloudProvider>, kinds: List<DriveKind>, pool: (DriveKind) -> List<CloudProvider>): Route {
+        val picks = ArrayList<CloudProvider>()
+        val full = ArrayList<CloudProvider>()
+        var satisfied = false
+        var anyAccount = false
+        for (kind in kinds) {
+            val accounts = pool(kind)
+            if (accounts.isEmpty()) continue
+            anyAccount = true
+            if (alreadyOn.any { it.kind == kind }) {
+                satisfied = true
+                continue
+            }
+            val online = accounts.filter { it in connected }
+            if (online.isEmpty()) continue
+            val target = online.firstOrNull { fits(it, item.sizeBytes) }
+            if (target == null) full += online else picks += target
+        }
+        if (picks.isNotEmpty()) {
+            picks.forEach { take(it, item.sizeBytes) }
+            return Route.Upload(picks, full)
+        }
+        if (full.isNotEmpty()) return Route.Full(full)
+        if (satisfied) return Route.Upload(emptyList())
+        return if (anyAccount) Route.NoDrive else Route.Skipped
+    }
+
+    /** 一共只放一份：排在最前、放得下的那个账号。 */
+    private fun single(item: BackupCandidate): Route {
+        val candidates = ranked.filter { it in connected }
         if (candidates.isEmpty()) return Route.NoDrive
         val target = candidates.firstOrNull { fits(it, item.sizeBytes) } ?: return Route.Full(candidates)
         take(target, item.sizeBytes)
         return Route.Upload(listOf(target))
+    }
+
+    /** 上传时网盘说空间满了（剩余空间查不到的账号也会这样）：这一轮后面的照片不再往它放。 */
+    fun markFull(p: CloudProvider) {
+        free[p] = 0L
     }
 
     private fun fits(p: CloudProvider, size: Long): Boolean {

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pick_title">Choose a photo</string>
+    <string name="pick_title_multi">Choose photos</string>
+    <string name="pick_selected">%1$d selected</string>
+    <string name="pick_done">Done</string>
+    <string name="pick_cancel">Cancel</string>
+    <string name="pick_empty">No photos or videos here.</string>
+    <string name="pick_clip_label">Photos</string>
+    <string name="shared_err_awaiting_move">These photos haven\'t been moved to the visible folder yet. You can share them once the move is done.</string>
+</resources>

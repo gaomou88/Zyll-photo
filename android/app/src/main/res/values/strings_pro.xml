@@ -16,4 +16,5 @@
     <string name="cloud_media_title">Connect cloud media</string>
     <string name="cloud_media_setting_active">On · Other apps can pick photos from Zyll\'s cloud</string>
     <string name="cloud_media_setting_off">Let other apps pick photos from Zyll\'s cloud</string>
+    <string name="cloud_media_setting_locked">Selected · Unlock Pro to show cloud photos in the picker</string>
 </resources>
