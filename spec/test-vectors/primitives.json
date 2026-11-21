@@ -1,0 +1,41 @@
+{
+    "description": "HKDF-SHA256 与 Argon2id 原语向量",
+    "hkdf": [
+        {
+            "name": "rfc5869-case1",
+            "ikm": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+            "salt": "000102030405060708090a0b0c",
+            "info": "f0f1f2f3f4f5f6f7f8f9",
+            "length": 42,
+            "okm": "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+        },
+        {
+            "name": "wrap-key-from-mk (empty salt)",
+            "ikm": "befb23f63a7e7435c0cececfa506daa575755bd5163b693d83eb2d4d01ae8c96",
+            "salt": "",
+            "info": "7a796c6c2f76312f77726170",
+            "length": 32,
+            "okm": "7d259b58ae6a1bfac5006f8e196bb5c5c21f149ff2662c017d696b69675538c8"
+        }
+    ],
+    "argon2id": [
+        {
+            "name": "min",
+            "password": "636f727265637420686f72736520e794b5e6b1a020737461706c65",
+            "salt": "964f4be6228d6096db8e553b49c10cd6",
+            "m": 8192,
+            "t": 1,
+            "p": 1,
+            "output": "dc72fa573d089c18af0b9cff6e8e2ee270c3cecf16681347465b7d995039c32c"
+        },
+        {
+            "name": "default",
+            "password": "636f727265637420686f72736520e794b5e6b1a020737461706c65",
+            "salt": "0e6ca19a136ba08d91e694b96adefad6",
+            "m": 65536,
+            "t": 3,
+            "p": 1,
+            "output": "b358593b034356d85938b2b628d1b197ca5bad18414ef898c0de1b8a56a195ea"
+        }
+    ]
+}

@@ -1,0 +1,97 @@
+{
+    "description": "密钥包向量。createInputs 用于逐字节复现；unlock 用于解锁测试",
+    "bundles": [
+        {
+            "name": "min-params",
+            "password": "correct horse 电池 staple",
+            "recoveryKey": "KFGO-L7ZX-P7EW-VQJY-O5OI-DV5F-SPRQ-24XT-GQRQ-MAJD-C5ON-7HLG-K5CA",
+            "masterKey": "ee00640694fab30c94088fd54688573a2632da1aac77a99c96c44036458b279c",
+            "wrapKey": "17768a8d16764782b61feb5d1f0130116ae71a2f1f0adc8f0ba818cb528cf509",
+            "createInputs": {
+                "vaultId": "00000000-0000-4000-8000-000000000001",
+                "m": 8192,
+                "t": 1,
+                "p": 1,
+                "pwSalt": "2e339c8aeae06f2664f7163bdf70e157",
+                "pwNonce": "6883c471e7809cf852401b17",
+                "rcSalt": "8ea60f5a92965a96321950783c37c468",
+                "rcNonce": "a4383d8fac631a0a2e7d92f1"
+            },
+            "bundle": {
+                "format": "zyll-keybundle",
+                "version": 1,
+                "vaultId": "00000000-0000-4000-8000-000000000001",
+                "slots": [
+                    {
+                        "type": "password",
+                        "kdf": {
+                            "alg": "argon2id",
+                            "v": 19,
+                            "m": 8192,
+                            "t": 1,
+                            "p": 1,
+                            "salt": "LjOciurgbyZk9xY733DhVw=="
+                        },
+                        "nonce": "aIPEceeAnPhSQBsX",
+                        "wrappedMk": "P7Vk7ALWU8tQpH1Qc/Q3ImHx3PxcKn5XQa4OaGHDGJ6JJUuveSjHqtLxRXq9VYhl"
+                    },
+                    {
+                        "type": "recovery",
+                        "kdf": {
+                            "alg": "hkdf-sha256",
+                            "salt": "jqYPWpKWWpYyGVB4PDfEaA=="
+                        },
+                        "nonce": "pDg9j6xjGgoufZLx",
+                        "wrappedMk": "zsp0PhX3rHSQnNJTPJC3eLMWsGJ5pw/zqICLJChZscqO8whURdgNpDLzF3F9u6uM"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "default-params",
+            "password": "correct horse 电池 staple",
+            "recoveryKey": "QVDY-6YOW-X55Q-RQY3-MKZ2-K5FB-QGUJ-QDRU-FSGB-AZXV-2OGN-UEXF-WPWQ",
+            "masterKey": "e121c96b3fbc24e9878bf8ce67398c4268d808ba9734031b568683cb42092dcc",
+            "wrapKey": "3105b19db3727290b50629a8b9129962f588ceb461ad4481686d84c13331f417",
+            "createInputs": {
+                "vaultId": "00000000-0000-4000-8000-000000000002",
+                "m": 65536,
+                "t": 3,
+                "p": 1,
+                "pwSalt": "0499633a74a1f0f804322727f48ef1a9",
+                "pwNonce": "acde2e4e674bf7d3a3782d4d",
+                "rcSalt": "244447b11c2e204c7f12295be9d8e25e",
+                "rcNonce": "3294dd638e964bc0b892ac7e"
+            },
+            "bundle": {
+                "format": "zyll-keybundle",
+                "version": 1,
+                "vaultId": "00000000-0000-4000-8000-000000000002",
+                "slots": [
+                    {
+                        "type": "password",
+                        "kdf": {
+                            "alg": "argon2id",
+                            "v": 19,
+                            "m": 65536,
+                            "t": 3,
+                            "p": 1,
+                            "salt": "BJljOnSh8PgEMicn9I7xqQ=="
+                        },
+                        "nonce": "rN4uTmdL99OjeC1N",
+                        "wrappedMk": "C3C701ybKBlH5BB96RVx42bUcPfP7uKOJpmeeIXSeQGNI03rUTBljfJP6ydjiEIr"
+                    },
+                    {
+                        "type": "recovery",
+                        "kdf": {
+                            "alg": "hkdf-sha256",
+                            "salt": "JERHsRwuIEx/Eilb6djiXg=="
+                        },
+                        "nonce": "MpTdY46WS8C4kqx+",
+                        "wrappedMk": "Nmbo2fFqpesVM4heqcWE6hpJwBLvfdUYNbjFLKnoK9ftQD5ESm+hb2nxbq6Xz3Kz"
+                    }
+                ]
+            }
+        }
+    ]
+}

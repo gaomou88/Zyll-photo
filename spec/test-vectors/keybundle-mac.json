@@ -1,0 +1,79 @@
+{
+  "description": "密钥包 rev 和 mac（spec/keybundle.md §5）。macKey = HKDF(K_wrap, 空 salt, \"zyll/v1/keybundle-mac\")，mac = HMAC-SHA256(macKey, macInput)",
+  "bundles": [
+    {
+      "name": "min-params",
+      "wrapKey": "17768a8d16764782b61feb5d1f0130116ae71a2f1f0adc8f0ba818cb528cf509",
+      "macKey": "8cd18d13ffbbf767707b13818e315df6f4389f5a9310e07a5a4a5eacb3ef09a8",
+      "macInput": "zyll-keybundle-mac/v1\n00000000-0000-4000-8000-000000000001\n1762800000000\npassword\nargon2id\n19\n8192\n1\n1\nLjOciurgbyZk9xY733DhVw==\naIPEceeAnPhSQBsX\nP7Vk7ALWU8tQpH1Qc/Q3ImHx3PxcKn5XQa4OaGHDGJ6JJUuveSjHqtLxRXq9VYhl\nrecovery\nhkdf-sha256\n\n\n\n\njqYPWpKWWpYyGVB4PDfEaA==\npDg9j6xjGgoufZLx\nzsp0PhX3rHSQnNJTPJC3eLMWsGJ5pw/zqICLJChZscqO8whURdgNpDLzF3F9u6uM\n",
+      "bundle": {
+        "format": "zyll-keybundle",
+        "version": 1,
+        "vaultId": "00000000-0000-4000-8000-000000000001",
+        "slots": [
+          {
+            "type": "password",
+            "kdf": {
+              "alg": "argon2id",
+              "v": 19,
+              "m": 8192,
+              "t": 1,
+              "p": 1,
+              "salt": "LjOciurgbyZk9xY733DhVw=="
+            },
+            "nonce": "aIPEceeAnPhSQBsX",
+            "wrappedMk": "P7Vk7ALWU8tQpH1Qc/Q3ImHx3PxcKn5XQa4OaGHDGJ6JJUuveSjHqtLxRXq9VYhl"
+          },
+          {
+            "type": "recovery",
+            "kdf": {
+              "alg": "hkdf-sha256",
+              "salt": "jqYPWpKWWpYyGVB4PDfEaA=="
+            },
+            "nonce": "pDg9j6xjGgoufZLx",
+            "wrappedMk": "zsp0PhX3rHSQnNJTPJC3eLMWsGJ5pw/zqICLJChZscqO8whURdgNpDLzF3F9u6uM"
+          }
+        ],
+        "rev": 1762800000000,
+        "mac": "g3kmMQl1Pp0jsW+d1X+qwV8i2wI4hbDbUXysaxFl13E="
+      }
+    },
+    {
+      "name": "default-params",
+      "wrapKey": "3105b19db3727290b50629a8b9129962f588ceb461ad4481686d84c13331f417",
+      "macKey": "984085409103e88ab5ef4eddcf6b6b4becd52a4e2dee12d24c1f5a8bc93a8956",
+      "macInput": "zyll-keybundle-mac/v1\n00000000-0000-4000-8000-000000000002\n1762800000000\npassword\nargon2id\n19\n65536\n3\n1\nBJljOnSh8PgEMicn9I7xqQ==\nrN4uTmdL99OjeC1N\nC3C701ybKBlH5BB96RVx42bUcPfP7uKOJpmeeIXSeQGNI03rUTBljfJP6ydjiEIr\nrecovery\nhkdf-sha256\n\n\n\n\nJERHsRwuIEx/Eilb6djiXg==\nMpTdY46WS8C4kqx+\nNmbo2fFqpesVM4heqcWE6hpJwBLvfdUYNbjFLKnoK9ftQD5ESm+hb2nxbq6Xz3Kz\n",
+      "bundle": {
+        "format": "zyll-keybundle",
+        "version": 1,
+        "vaultId": "00000000-0000-4000-8000-000000000002",
+        "slots": [
+          {
+            "type": "password",
+            "kdf": {
+              "alg": "argon2id",
+              "v": 19,
+              "m": 65536,
+              "t": 3,
+              "p": 1,
+              "salt": "BJljOnSh8PgEMicn9I7xqQ=="
+            },
+            "nonce": "rN4uTmdL99OjeC1N",
+            "wrappedMk": "C3C701ybKBlH5BB96RVx42bUcPfP7uKOJpmeeIXSeQGNI03rUTBljfJP6ydjiEIr"
+          },
+          {
+            "type": "recovery",
+            "kdf": {
+              "alg": "hkdf-sha256",
+              "salt": "JERHsRwuIEx/Eilb6djiXg=="
+            },
+            "nonce": "MpTdY46WS8C4kqx+",
+            "wrappedMk": "Nmbo2fFqpesVM4heqcWE6hpJwBLvfdUYNbjFLKnoK9ftQD5ESm+hb2nxbq6Xz3Kz"
+          }
+        ],
+        "rev": 1762800000000,
+        "mac": "B/mD4VbEnTgULm0or1YGWwoCZItOKW8cxP/nOMP6wCY="
+      }
+    }
+  ]
+}
